@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RRHH.WhatsApp.Application\RRHH.WhatsApp.Application.csproj" />
+    <ProjectReference Include="..\RRHH.WhatsApp.Infrastructure\RRHH.WhatsApp.Infrastructure.csproj" />
+    <ProjectReference Include="..\RRHH.WhatsApp.Reporting\RRHH.WhatsApp.Reporting.csproj" />
+    <ProjectReference Include="..\RRHH.WhatsApp.Contracts\RRHH.WhatsApp.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
