@@ -1,0 +1,84 @@
+@* Lista agrupada por cuenta, como pide la Seccion 7: cada cliente en su propia subdivision. *@
+<div class="lista-conversaciones">
+    @if (Conversaciones.Count == 0)
+    {
+        <p class="vacio">No hay conversaciones para mostrar.</p>
+    }
+
+    @foreach (var grupo in Agrupadas())
+    {
+        <div class="grupo-cuenta">
+            <h3>@grupo.Key <span class="cantidad">@grupo.Count()</span></h3>
+
+            @foreach (var conversacion in grupo.OrderByDescending(c => c.FechaUltimaActividad))
+            {
+                <button type="button"
+                        class="fila-conversacion @(conversacion.ConversacionId == SeleccionadaId ? "activa" : "")"
+                        @onclick="() => AlSeleccionar.InvokeAsync(conversacion.ConversacionId)">
+
+                    <div class="fila-cabecera">
+                        <span class="nombre">@(conversacion.NombrePostulante ?? conversacion.TelefonoE164)</span>
+
+                        @* Regla 2: lo que todavia espera respuesta es lo que va a escalar. *@
+                        @if (conversacion.EsperandoRespuesta)
+                        {
+                            <span class="pendiente" title="El postulante espera respuesta">●</span>
+                        }
+                    </div>
+
+                    <div class="fila-detalle">
+                        @if (conversacion.Dni is { } dni)
+                        {
+                            <span class="dni">DNI @dni</span>
+                        }
+
+                        <span class="fecha">@Momento(conversacion.FechaUltimaActividad)</span>
+                    </div>
+
+                    @* Regla 15: fuera de la ventana solo se puede responder con plantilla. *@
+                    @if (!conversacion.VentanaAbierta)
+                    {
+                        <span class="ventana-cerrada">ventana cerrada</span>
+                    }
+
+                    @* Regla 6: aviso generico, sin detalle de las otras conversaciones. *@
+                    @if (conversacion.OtrasCuentasEnProceso.Count > 0)
+                    {
+                        <span class="multicuenta" title="En proceso con otras cuentas">
+                            también en @string.Join(", ", conversacion.OtrasCuentasEnProceso)
+                        </span>
+                    }
+                </button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ConversacionResumen> Conversaciones { get; set; } = [];
+    [Parameter] public int? SeleccionadaId { get; set; }
+    [Parameter] public EventCallback<int> AlSeleccionar { get; set; }
+
+    private IEnumerable<IGrouping<string, ConversacionResumen>> Agrupadas() =>
+        Conversaciones
+            .GroupBy(c => c.Cuenta ?? "Sin clasificar")
+            .OrderBy(g => g.Key == "Sin clasificar" ? 1 : 0)
+            .ThenBy(g => g.Key);
+
+    private static string Momento(DateTime utc)
+    {
+        var transcurrido = DateTime.UtcNow - utc;
+
+        return transcurrido switch
+        {
+            { TotalMinutes: < 1 } => "recién",
+            { TotalHours: < 1 } => $"hace {(int)transcurrido.TotalMinutes} min",
+            { TotalDays: < 1 } => $"hace {(int)transcurrido.TotalHours} h",
+            { TotalDays: < 30 } => $"hace {(int)transcurrido.TotalDays} d",
+            _ => ARegionLima(utc).ToString("dd/MM/yyyy")
+        };
+    }
+
+    /// <summary>Las fechas se guardan en UTC y se muestran en hora de Lima (UTC-5, sin verano).</summary>
+    private static DateTime ARegionLima(DateTime utc) => utc.AddHours(-5);
+}

@@ -1,0 +1,61 @@
+@page "/vacantes"
+@rendermode InteractiveServer
+@inject ClienteApi Api
+@inject SesionAnalista Sesion
+
+<PageTitle>Vacantes</PageTitle>
+
+@* Punto de entrada al tablero: el kanban es por vacante, no por cuenta (Regla 13). *@
+<div class="vacantes">
+    <h1>Vacantes abiertas</h1>
+
+    @if (!Sesion.Activa)
+    {
+        <p class="vacio">Tu sesión expiró. Volvé a entrar.</p>
+    }
+    else if (_cuentas.Count == 0)
+    {
+        <p class="vacio">Este analista no tiene cuentas asignadas.</p>
+    }
+    else
+    {
+        @foreach (var cuenta in _cuentas)
+        {
+            <section class="cuenta">
+                <h2>
+                    @cuenta.Nombre
+                    @if (cuenta.EsBackup)
+                    {
+                        <span class="chip">respaldo</span>
+                    }
+                </h2>
+
+                @if (cuenta.VacantesAbiertas == 0)
+                {
+                    <p class="vacio">Sin vacantes abiertas.</p>
+                }
+                else
+                {
+                    <p class="detalle">@cuenta.VacantesAbiertas vacante(s) abierta(s)</p>
+                }
+            </section>
+        }
+
+        <div class="ir-al-tablero">
+            <label for="hc">Abrir el tablero de la vacante</label>
+            <input id="hc" type="number" class="form-control" @bind="_hcId" min="1" />
+            <a class="btn btn-primary" href="@($"/tablero/{_hcId}")">Ver tablero</a>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<CuentaDeAnalista> _cuentas = [];
+    private int _hcId = 1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Sesion.AnalistaId is { } id)
+            _cuentas = await Api.CuentasDeAnalistaAsync(id);
+    }
+}

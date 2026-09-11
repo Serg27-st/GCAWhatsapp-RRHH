@@ -24,6 +24,16 @@ public class Analista
 
     public bool Activo { get; set; } = true;
 
+    /// <summary>
+    /// Hash de la contraseña (Sección 9.6.1). Nulo significa que este analista todavía no puede
+    /// entrar: es lo correcto por omisión — un alta sin contraseña no debe dejar una cuenta
+    /// abierta, sino una cuenta que aún no sirve.
+    /// </summary>
+    public string? HashContrasena { get; set; }
+
+    /// <summary>Cuándo se cambió por última vez. Sirve para exigir rotación si algún día hace falta.</summary>
+    public DateTime? FechaContrasena { get; set; }
+
     public ICollection<AnalistaCuenta> Cuentas { get; set; } = [];
     public ICollection<Ausencia> Ausencias { get; set; } = [];
 }

@@ -1,8 +1,12 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\RRHH.WhatsApp.Domain\RRHH.WhatsApp.Domain.csproj" />
     <ProjectReference Include="..\RRHH.WhatsApp.Contracts\RRHH.WhatsApp.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
   </ItemGroup>
 
   <PropertyGroup>

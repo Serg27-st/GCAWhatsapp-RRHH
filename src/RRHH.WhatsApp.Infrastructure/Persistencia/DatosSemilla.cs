@@ -43,7 +43,11 @@ public static class DatosSemilla
             Config(ClavesConfiguracion.EnvioMaximoPorSegundo, "10",
                 "Seccion 9.6.4: tope de velocidad de envio saliente hacia Meta, para no repetir el patron que causo el bloqueo."),
             Config(ClavesConfiguracion.ReintentosMaximosEvento, "5",
-                "Seccion 9.6.2: intentos de procesamiento de un evento de la outbox antes de marcarlo como fallido."));
+                "Seccion 9.6.2: intentos de procesamiento de un evento de la outbox antes de marcarlo como fallido."),
+            Config(ClavesConfiguracion.EnvioReintentosMaximos, "4",
+                "Intentos de un saliente rechazado por causa transitoria antes de darlo por perdido."),
+            Config(ClavesConfiguracion.EnvioReintentoBaseSegundos, "60",
+                "Base del retroceso exponencial entre reintentos de envio: 1m, 2m, 4m."));
 
         // Catalogo de plantillas. Quedan INACTIVAS a proposito: cada una debe registrarse y
         // aprobarse en Meta, y recien ahi se activa desde la administracion. El texto de abajo es

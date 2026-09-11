@@ -29,6 +29,7 @@ public class RrhhDbContext(DbContextOptions<RrhhDbContext> options) : DbContext(
     public DbSet<EventoSistema> EventosSistema => Set<EventoSistema>();
     public DbSet<ConfiguracionRegla> ConfiguracionReglas => Set<ConfiguracionRegla>();
     public DbSet<Auditoria> Auditorias => Set<Auditoria>();
+    public DbSet<LatidoServicio> LatidosServicio => Set<LatidoServicio>();
 
     protected override void OnModelCreating(ModelBuilder modelo)
     {

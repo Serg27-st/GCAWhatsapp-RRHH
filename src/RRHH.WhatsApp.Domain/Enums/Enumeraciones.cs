@@ -66,6 +66,35 @@ public enum CategoriaPlantilla
     Autenticacion = 4
 }
 
+/// <summary>
+/// Por que fallo un envio saliente. Es lo que decide si reintentarlo es seguro, util, o ninguna
+/// de las dos cosas.
+/// </summary>
+public enum ClaseFallo
+{
+    Ninguno = 0,
+
+    /// <summary>
+    /// El proveedor no llego a procesar la peticion: 5xx, 429 o un fallo de conexion. El mensaje
+    /// no salio, asi que reintentarlo no puede duplicar nada.
+    /// </summary>
+    Transitorio = 1,
+
+    /// <summary>
+    /// Credenciales invalidas, payload rechazado, plantilla sin aprobar. Reintentar da el mismo
+    /// resultado y solo gasta cuota contra Meta.
+    /// </summary>
+    Permanente = 2,
+
+    /// <summary>
+    /// Se perdio la respuesta y no se sabe si Meta acepto el mensaje. La Cloud API no admite una
+    /// clave de idempotencia, de modo que un reintento puede entregar el mismo mensaje dos veces
+    /// — justo lo que este proyecto existe para evitar. No se reintenta solo: queda para que una
+    /// persona decida.
+    /// </summary>
+    Ambiguo = 3
+}
+
 /// <summary>Estado de un registro de la tabla outbox (EventosSistema).</summary>
 public enum EstadoEvento
 {

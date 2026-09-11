@@ -1,0 +1,25 @@
+@inject SesionAnalista Sesion
+@inject NavigationManager Navegacion
+
+<div class="barra-sesion">
+    <div>
+        <span class="etiqueta">Sesión</span>
+        <span class="nombre">@Sesion.Nombre</span>
+
+        @if (Sesion.EsSistemas)
+        {
+            <span class="chip">Sistemas</span>
+        }
+    </div>
+
+    <button class="btn btn-link" @onclick="Salir">Salir</button>
+</div>
+
+@code {
+    private void Salir()
+    {
+        Sesion.Cerrar();
+
+        Navegacion.NavigateTo("/entrar", forceLoad: false);
+    }
+}

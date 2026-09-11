@@ -1,0 +1,127 @@
+@inject ClienteApi Api
+@inject SesionAnalista Sesion
+
+@* Seccion 7: destacar, descartar y transferir. El motivo es obligatorio en blacklist (Regla 7) y
+   la transferencia va a un analista por vez (Regla 8). *@
+<div class="acciones-rapidas">
+    <button class="btn btn-outline-success" @onclick="() => Abrir(Accion.Whitelist)"
+            disabled="@(!HayPostulante)">Destacar</button>
+
+    <button class="btn btn-outline-danger" @onclick="() => Abrir(Accion.Blacklist)"
+            disabled="@(!HayPostulante)">Descartar</button>
+
+    <button class="btn btn-outline-secondary" @onclick="() => Abrir(Accion.Transferir)">Transferir</button>
+</div>
+
+@if (_abierta is { } accion)
+{
+    <div class="dialogo">
+        <h4>@Titulo(accion)</h4>
+
+        @if (accion == Accion.Transferir)
+        {
+            <select class="form-select" @bind="_destinoId">
+                <option value="0">Elegir analista…</option>
+
+                @foreach (var analista in _analistas.Where(a => a.AnalistaId != Sesion.AnalistaId))
+                {
+                    <option value="@analista.AnalistaId">@analista.Nombre</option>
+                }
+            </select>
+
+            <label class="urgente">
+                <input type="checkbox" @bind="_urgente" />
+                Urgente (se aplica sin esperar que la acepten)
+            </label>
+        }
+
+        <textarea class="form-control" rows="2" @bind="_motivo"
+                  placeholder="@(accion == Accion.Blacklist ? "Motivo (obligatorio)" : "Motivo (opcional)")"></textarea>
+
+        <div class="dialogo-acciones">
+            <button class="btn btn-primary" @onclick="Confirmar" disabled="@(!PuedeConfirmar(accion))">
+                Confirmar
+            </button>
+            <button class="btn btn-link" @onclick="Cerrar">Cancelar</button>
+        </div>
+
+        @if (_error is { } error)
+        {
+            <p class="error">@error</p>
+        }
+    </div>
+}
+
+@code {
+    private enum Accion { Whitelist, Blacklist, Transferir }
+
+    [Parameter, EditorRequired] public ConversacionDetalle Detalle { get; set; } = default!;
+    [Parameter] public EventCallback AlCambiar { get; set; }
+
+    private IReadOnlyList<AnalistaResumen> _analistas = [];
+    private Accion? _abierta;
+    private string _motivo = string.Empty;
+    private int _destinoId;
+    private bool _urgente;
+    private string? _error;
+
+    /// <summary>Marcar necesita el DNI: hasta que complete el formulario solo hay un teléfono.</summary>
+    private bool HayPostulante =>
+        Detalle.Postulaciones.Count > 0 && Detalle.Resumen.CuentaId is not null;
+
+    protected override async Task OnInitializedAsync() => _analistas = await Api.AnalistasAsync();
+
+    private void Abrir(Accion accion)
+    {
+        _abierta = accion;
+        _motivo = string.Empty;
+        _destinoId = 0;
+        _urgente = false;
+        _error = null;
+    }
+
+    private void Cerrar() => _abierta = null;
+
+    private static string Titulo(Accion accion) => accion switch
+    {
+        Accion.Whitelist => "Destacar postulante",
+        Accion.Blacklist => "Descartar postulante",
+        _ => "Transferir conversación"
+    };
+
+    private bool PuedeConfirmar(Accion accion) => accion switch
+    {
+        Accion.Blacklist => !string.IsNullOrWhiteSpace(_motivo),
+        Accion.Transferir => _destinoId > 0,
+        _ => true
+    };
+
+    private async Task Confirmar()
+    {
+        if (_abierta is not { } accion || Sesion.AnalistaId is not { } analistaId)
+            return;
+
+        var conversacionId = Detalle.Resumen.ConversacionId;
+
+        var respuesta = accion == Accion.Transferir
+            ? await Api.TransferirAsync(conversacionId,
+                new PeticionTransferir(_destinoId, _urgente, Vacio(_motivo)))
+            : await Api.MarcarAsync(conversacionId, new PeticionMarcar(
+                Detalle.Postulaciones[0].PostulanteId,
+                Detalle.Resumen.CuentaId!.Value,
+                accion.ToString(),
+                Vacio(_motivo)));
+
+        if (!respuesta.Exito)
+        {
+            _error = respuesta.Motivo;
+            return;
+        }
+
+        Cerrar();
+
+        await AlCambiar.InvokeAsync();
+    }
+
+    private static string? Vacio(string valor) => string.IsNullOrWhiteSpace(valor) ? null : valor;
+}

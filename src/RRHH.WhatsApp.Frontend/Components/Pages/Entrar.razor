@@ -1,0 +1,70 @@
+@page "/entrar"
+@rendermode InteractiveServer
+@layout Layout.LayoutVacio
+@inject ClienteApi Api
+@inject SesionAnalista Sesion
+@inject NavigationManager Navegacion
+
+<PageTitle>Entrar</PageTitle>
+
+@* Seccion 9.6.1. Antes de esto el analista se elegia de una lista desplegable: cualquiera podia
+   trabajar como cualquiera, y la Regla 4 no tenia efecto real. *@
+<div class="entrar">
+    <form class="tarjeta-entrar" @onsubmit="Ingresar" @onsubmit:preventDefault="true">
+        <h1>RRHH · WhatsApp</h1>
+        <p class="subtitulo">Bandeja del analista</p>
+
+        <label for="email">Correo</label>
+        <input id="email" class="form-control" type="email" @bind="_email" autocomplete="username" />
+
+        <label for="clave">Contraseña</label>
+        <input id="clave" class="form-control" type="password" @bind="_contrasena"
+               autocomplete="current-password" />
+
+        <button class="btn btn-primary" type="submit" disabled="@(_entrando || !Completo)">
+            @(_entrando ? "Entrando…" : "Entrar")
+        </button>
+
+        @if (_error is { } error)
+        {
+            <p class="error">@error</p>
+        }
+    </form>
+</div>
+
+@code {
+    private string _email = string.Empty;
+    private string _contrasena = string.Empty;
+    private bool _entrando;
+    private string? _error;
+
+    private bool Completo => !string.IsNullOrWhiteSpace(_email) && !string.IsNullOrWhiteSpace(_contrasena);
+
+    protected override void OnInitialized()
+    {
+        // Si ya hay sesion, no tiene sentido volver a pedirla.
+        if (Sesion.Activa)
+            Navegacion.NavigateTo("/bandeja");
+    }
+
+    private async Task Ingresar()
+    {
+        _entrando = true;
+        _error = null;
+
+        var resultado = await Api.LoginAsync(_email.Trim(), _contrasena);
+
+        _entrando = false;
+
+        if (resultado is null)
+        {
+            // Mismo mensaje para usuario inexistente y contraseña incorrecta: distinguirlos le
+            // diria a quien prueba credenciales cuales de los correos son reales.
+            _error = "Credenciales incorrectas.";
+            return;
+        }
+
+        Sesion.Iniciar(resultado);
+        Navegacion.NavigateTo("/bandeja");
+    }
+}

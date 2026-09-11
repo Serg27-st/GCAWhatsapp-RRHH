@@ -1,0 +1,201 @@
+@page "/"
+@page "/bandeja"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject ClienteApi Api
+@inject SesionAnalista Sesion
+@inject Microsoft.Extensions.Options.IOptions<OpcionesApi> Opciones
+@inject CanalEnVivo Canal
+@inject NavigationManager Navegacion
+@using RRHH.WhatsApp.Contracts.TiempoReal
+
+<PageTitle>Bandeja</PageTitle>
+
+<div class="bandeja">
+    <aside class="columna-lista">
+        <BarraSesion />
+
+        <div class="buscador">
+            <input class="form-control" placeholder="Buscar por DNI…"
+                   @bind="_dni" @bind:event="oninput" @onkeyup="BuscarSiEnter" />
+
+            @if (_buscando)
+            {
+                <button class="btn btn-link" @onclick="LimpiarBusqueda">Volver a mi bandeja</button>
+            }
+        </div>
+
+        @* Lo ultimo que llego por el canal en vivo. El punto indica si el canal esta abierto: si
+           no lo esta, la bandeja sigue al dia por el intervalo, pero con retraso. *@
+        @if (_ultimoAviso is { } aviso)
+        {
+            <div class="aviso-vivo">
+                <span class="senal @(Canal.Conectado ? "activa" : "")" title="@(Canal.Conectado ? "En vivo" : "Sin canal en vivo")">●</span>
+                @aviso
+            </div>
+        }
+
+        <div class="pestanas">
+            <button class="@(_vista == Vista.Mias ? "activa" : "")" @onclick="() => Cambiar(Vista.Mias)">
+                Mis conversaciones
+            </button>
+
+            @* Regla 19: lo que el bot no logro clasificar, visible para todos. *@
+            <button class="@(_vista == Vista.Pendientes ? "activa" : "")" @onclick="() => Cambiar(Vista.Pendientes)">
+                Sin clasificar
+            </button>
+        </div>
+
+        @if (_cargando)
+        {
+            <p class="vacio">Cargando…</p>
+        }
+        else
+        {
+            <ListaConversaciones Conversaciones="_conversaciones"
+                                 SeleccionadaId="_seleccionadaId"
+                                 AlSeleccionar="Seleccionar" />
+        }
+    </aside>
+
+    <main class="columna-chat">
+        <PanelChat Detalle="_detalle" AlCambiar="RefrescarTodo" />
+    </main>
+</div>
+
+@code {
+    private enum Vista { Mias, Pendientes, Busqueda }
+
+    private IReadOnlyList<ConversacionResumen> _conversaciones = [];
+    private ConversacionDetalle? _detalle;
+    private Vista _vista = Vista.Mias;
+    private int? _seleccionadaId;
+    private string _dni = string.Empty;
+    private bool _cargando;
+    private bool _buscando;
+    private Timer? _refresco;
+    private string? _ultimoAviso;
+
+    protected override void OnInitialized()
+    {
+        if (!Sesion.Activa)
+        {
+            Navegacion.NavigateTo("/entrar");
+            return;
+        }
+
+        Sesion.Cambio += AlCambiarSesion;
+
+        // El canal en vivo (Seccion 9.6.3) trae escalamientos, transferencias y avisos sin que el
+        // analista refresque. El intervalo queda como respaldo: si el hub esta caido o el aviso se
+        // pierde, la bandeja igual se pone al dia sola.
+        Canal.Aviso += AlLlegarAviso;
+
+        var intervalo = TimeSpan.FromSeconds(Opciones.Value.RefrescoSegundos);
+
+        _refresco = new Timer(_ => InvokeAsync(RefrescarLista), null, intervalo, intervalo);
+    }
+
+
+    protected override async Task OnAfterRenderAsync(bool primeraVez)
+    {
+        if (!primeraVez || !Sesion.Activa)
+            return;
+
+        // Recien aca hay circuito interactivo: conectar el hub durante el prerenderizado abriria
+        // una conexion que se descarta al segundo siguiente.
+        await Canal.ConectarAsync(Sesion.Token!);
+        await RefrescarLista();
+    }
+    /// <summary>
+    /// Llega desde el hub. Se recarga la lista en vez de insertar la novedad a mano: el aviso dice
+    /// que algo cambio, no cual es el estado nuevo, y la Api es la que sabe.
+    /// </summary>
+    private Task AlLlegarAviso(NotificacionAnalista aviso) => InvokeAsync(async () =>
+    {
+        _ultimoAviso = aviso.Mensaje;
+
+        await RefrescarTodo();
+    });
+
+    private void AlCambiarSesion() => InvokeAsync(async () =>
+    {
+        _seleccionadaId = null;
+        _detalle = null;
+
+        if (!Sesion.Activa)
+        {
+            Navegacion.NavigateTo("/entrar");
+            return;
+        }
+
+        await Canal.ConectarAsync(Sesion.Token!);
+        await RefrescarLista();
+    });
+
+    private async Task Cambiar(Vista vista)
+    {
+        _vista = vista;
+        _buscando = false;
+
+        await RefrescarLista();
+    }
+
+    private async Task BuscarSiEnter(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || string.IsNullOrWhiteSpace(_dni))
+            return;
+
+        _vista = Vista.Busqueda;
+        _buscando = true;
+
+        await RefrescarLista();
+    }
+
+    private async Task LimpiarBusqueda()
+    {
+        _dni = string.Empty;
+
+        await Cambiar(Vista.Mias);
+    }
+
+    private async Task Seleccionar(int conversacionId)
+    {
+        _seleccionadaId = conversacionId;
+        _detalle = await Api.DetalleAsync(conversacionId);
+    }
+
+    private async Task RefrescarTodo()
+    {
+        await RefrescarLista();
+
+        if (_seleccionadaId is { } id)
+            _detalle = await Api.DetalleAsync(id);
+    }
+
+    private async Task RefrescarLista()
+    {
+        _cargando = true;
+        StateHasChanged();
+
+        _conversaciones = _vista switch
+        {
+            Vista.Pendientes => await Api.PendientesAsync(),
+            Vista.Busqueda => await Api.BuscarPorDniAsync(_dni.Trim()),
+            _ => Sesion.AnalistaId is { } id ? await Api.BandejaAsync(id) : []
+        };
+
+        _cargando = false;
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Sesion.Cambio -= AlCambiarSesion;
+        Canal.Aviso -= AlLlegarAviso;
+
+        _refresco?.Dispose();
+
+        await Canal.DisposeAsync();
+    }
+}

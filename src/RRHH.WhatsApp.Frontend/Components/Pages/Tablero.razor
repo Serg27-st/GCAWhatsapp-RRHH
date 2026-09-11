@@ -1,0 +1,108 @@
+@page "/tablero/{HcId:int}"
+@rendermode InteractiveServer
+@inject ClienteApi Api
+@inject SesionAnalista Sesion
+
+<PageTitle>Tablero</PageTitle>
+
+@* Regla 13: columnas arrastrables. Se usa el drag nativo del navegador y no una libreria: alcanza
+   para mover una tarjeta y evita sumar JavaScript al proyecto. *@
+<div class="tablero">
+    <header>
+        <h1>@(_tablero?.Vacante ?? $"Vacante {HcId}")</h1>
+
+        @if (_error is { } error)
+        {
+            <p class="error">@error</p>
+        }
+    </header>
+
+    @if (_tablero is null)
+    {
+        <p class="vacio">Cargando el tablero…</p>
+    }
+    else
+    {
+        <div class="columnas">
+            @foreach (var etapa in _tablero.Etapas.OrderBy(e => e.Orden))
+            {
+                <section class="columna @(_destino == etapa.EtapaId ? "destino" : "")"
+                         @ondragover:preventDefault="true"
+                         @ondragenter="() => _destino = etapa.EtapaId"
+                         @ondragleave="() => _destino = null"
+                         @ondrop="() => Soltar(etapa.EtapaId)">
+
+                    <h2>@etapa.Nombre <span class="cantidad">@etapa.Postulaciones.Count</span></h2>
+
+                    @foreach (var tarjeta in etapa.Postulaciones)
+                    {
+                        <article class="tarjeta" draggable="true" @ondragstart="() => _arrastrada = tarjeta">
+                            <strong>@(tarjeta.NombrePostulante ?? $"Postulante {tarjeta.PostulanteId}")</strong>
+
+                            @if (tarjeta.Dni is { } dni)
+                            {
+                                <span class="dni">DNI @dni</span>
+                            }
+
+                            <span class="estado">@tarjeta.Estado</span>
+                        </article>
+                    }
+                </section>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int HcId { get; set; }
+
+    private TableroKanban? _tablero;
+    private PostulacionResumen? _arrastrada;
+    private int? _destino;
+    private string? _error;
+
+    protected override Task OnParametersSetAsync() => Cargar();
+
+    private async Task Cargar()
+    {
+        _tablero = await Api.TableroAsync(HcId);
+        _destino = null;
+    }
+
+    private async Task Soltar(int etapaId)
+    {
+        _destino = null;
+
+        if (_arrastrada is not { } tarjeta)
+            return;
+
+        if (Sesion.AnalistaId is not { } analistaId)
+        {
+            _error = "Elegí un analista antes de mover tarjetas.";
+            _arrastrada = null;
+            return;
+        }
+
+        // Soltar en la misma columna no es un movimiento: evita una auditoria vacia por arrastre.
+        if (tarjeta.EtapaKanbanId == etapaId)
+        {
+            _arrastrada = null;
+            return;
+        }
+
+        _error = null;
+
+        // La ruta cuelga de la conversacion, pero lo que se mueve es la postulacion: el hilo es
+        // por telefono y el kanban por vacante (desviacion V1 de docs/decisiones.md).
+        var respuesta = await Api.MoverEtapaAsync(
+            tarjeta.PostulacionId,
+            new PeticionMoverEtapa(tarjeta.PostulacionId, etapaId));
+
+        if (!respuesta.Exito)
+            _error = respuesta.Motivo;
+
+        _arrastrada = null;
+
+        await Cargar();
+    }
+}

@@ -55,6 +55,15 @@ public static class ClavesConfiguracion
     public const string RetencionCvDias = "datos.retencion_cv_dias";
     public const string VersionAvisoPrivacidad = "datos.version_aviso_privacidad";
     public const string EnvioMaximoPorSegundo = "envio.maximo_por_segundo";
+
+    /// <summary>Intentos de un saliente antes de darlo por perdido y dejarlo visible al analista.</summary>
+    public const string EnvioReintentosMaximos = "envio.reintentos_maximos";
+
+    /// <summary>
+    /// Base del retroceso exponencial entre reintentos. Crece 1x, 2x, 4x: si Meta esta caido,
+    /// insistir cada pocos segundos no adelanta nada y suma trafico a un servicio que ya falla.
+    /// </summary>
+    public const string EnvioReintentoBaseSegundos = "envio.reintento_base_segundos";
     public const string ReintentosMaximosEvento = "outbox.reintentos_maximos";
 }
 

@@ -1,4 +1,5 @@
 using RRHH.WhatsApp.Domain.Entidades;
+using RRHH.WhatsApp.Domain.Enums;
 
 namespace RRHH.WhatsApp.Domain.Reglas;
 
@@ -47,6 +48,18 @@ public sealed class ContextoRegla
     /// <summary>Otras cuentas en las que el mismo DNI esta en proceso, para el aviso generico de la Regla 6.</summary>
     public IReadOnlyList<Cuenta> OtrasCuentasEnProceso { get; init; } = [];
 
+    /// <summary>
+    /// Vacantes abiertas de la cuenta en contexto. Regla 20: si esta vacia, no hay a que postular
+    /// y el bot tiene que decirlo en vez de mandar un enlace muerto.
+    /// </summary>
+    public IReadOnlyList<Hc> VacantesAbiertas { get; init; } = [];
+
+    /// <summary>
+    /// Vacantes de este hilo a las que ya se les mando el enlace del JobForms. Evita reenviarlo en
+    /// cada mensaje del postulante, y tambien reenviarlo despues de que ya completo el formulario.
+    /// </summary>
+    public IReadOnlyList<int> HcsConInvitacion { get; init; } = [];
+
     /// <summary>Regla 14: el titular esta de vacaciones o descanso medico.</summary>
     public bool TitularAusente { get; init; }
 
@@ -61,6 +74,35 @@ public sealed class ContextoRegla
 
     /// <summary>Cuantos intentos lleva el bot mostrando el menu sin recibir una opcion valida (Regla 19).</summary>
     public int IntentosMenuFallidos { get; init; }
+
+    /// <summary>
+    /// Estados de las postulaciones del mismo postulante, en todas las cuentas.
+    /// <para>
+    /// Se entregan crudos en vez de resumidos en una bandera porque cada regla mira algo distinto:
+    /// la 16 no archiva si hay algo <c>EnProceso</c> o <c>Contratado</c>, y la 9 no repregunta la
+    /// empresa si el analista ya decidio (<c>Contratado</c> o <c>Descartado</c>). Resumirlo aca
+    /// obligaria a una bandera por regla.
+    /// </para>
+    /// <para>
+    /// El dossier menciona ademas una marca de "reingreso" que el modelo todavia no tiene donde
+    /// guardar; ver docs/decisiones.md.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<EstadoPostulacion> EstadosPostulaciones { get; init; } = [];
+
+    /// <summary>
+    /// Regla 9: dias entre el mensaje entrante actual y el anterior. No se puede leer de
+    /// FechaUltimaActividad porque para cuando las reglas corren ya la movio el mensaje que las
+    /// disparo. Nulo si es el primer mensaje del hilo.
+    /// </summary>
+    public double? DiasDesdeMensajeAnterior { get; init; }
+
+    /// <summary>
+    /// Regla 9: enlace del JobForms que corresponde a <see cref="Invitacion"/>, ya armado con su
+    /// token. La regla lo necesita como parametro de la plantilla del recordatorio, pero armar la
+    /// URL no es decision suya: se resuelve al construir el contexto.
+    /// </summary>
+    public string? EnlaceInvitacion { get; init; }
 
     /// <summary>
     /// Minutos a reloj corrido desde que el postulante escribio sin obtener respuesta del analista.

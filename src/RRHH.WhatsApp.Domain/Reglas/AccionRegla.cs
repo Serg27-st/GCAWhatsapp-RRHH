@@ -20,6 +20,12 @@ public sealed record MostrarMenuEmpresas(bool EsReintento) : AccionRegla;
 
 public sealed record EnviarLinkJobForms(int HcId) : AccionRegla;
 
+/// <summary>
+/// Regla 9 y Regla 20: menu de vacantes abiertas de una cuenta. Aparece cuando la cuenta tiene
+/// mas de un HC, porque el enlace del JobForms es por vacante y no por cliente.
+/// </summary>
+public sealed record MostrarMenuVacantes(int CuentaId) : AccionRegla;
+
 public sealed record AsignarAnalista(int AnalistaId, string Motivo) : AccionRegla;
 
 /// <summary>Regla 2 y Regla 14: pasa la conversacion al respaldo fijo de la cuenta.</summary>
@@ -49,6 +55,18 @@ public sealed record BloquearEnvio(string Motivo) : AccionRegla;
 public sealed record PublicarEvento(string Tipo, object Payload) : AccionRegla;
 
 public sealed record RegistrarAuditoria(string Accion, string Detalle) : AccionRegla;
+
+/// <summary>
+/// Regla 9: el bot vuelve a preguntar la empresa tras la inactividad configurada, asi que el
+/// contexto anterior deja de valer. Sin esto no hay forma de deshacer un EstablecerCuentaContexto.
+/// </summary>
+public sealed record LimpiarCuentaContexto(string Motivo) : AccionRegla;
+
+/// <summary>Regla 9: sella el recordatorio de 24h para que el proximo barrido no lo repita.</summary>
+public sealed record MarcarRecordatorioJobForms(int InvitacionId) : AccionRegla;
+
+/// <summary>Regla 9: sella el aviso al analista de 48h.</summary>
+public sealed record MarcarAvisoAnalistaJobForms(int InvitacionId) : AccionRegla;
 
 /// <summary>Resultado de evaluar una regla.</summary>
 public sealed record ResultadoRegla(IReadOnlyList<AccionRegla> Acciones, bool DetenerEvaluacion = false)

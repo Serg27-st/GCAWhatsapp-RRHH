@@ -1,0 +1,83 @@
+@inject ClienteApi Api
+@inject SesionAnalista Sesion
+
+<div class="panel-chat">
+    @if (Detalle is null)
+    {
+        <p class="vacio">Elegí una conversación de la lista.</p>
+    }
+    else
+    {
+        <header class="chat-cabecera">
+            <div>
+                <h2>@(Detalle.Resumen.NombrePostulante ?? Detalle.Resumen.TelefonoE164)</h2>
+
+                <div class="chat-subtitulo">
+                    @if (Detalle.Resumen.Dni is { } dni)
+                    {
+                        <span>DNI @dni</span>
+                    }
+                    @if (Detalle.Resumen.Cuenta is { } cuenta)
+                    {
+                        <span>@cuenta</span>
+                    }
+                    <span>@Detalle.Resumen.TelefonoE164</span>
+                </div>
+            </div>
+
+            @* Regla 6: el analista tiene que saberlo para no cruzar ofertas, pero sin ver el detalle. *@
+            @if (Detalle.Postulaciones.Count > 0)
+            {
+                <div class="postulaciones">
+                    @foreach (var postulacion in Detalle.Postulaciones)
+                    {
+                        <span class="chip" title="@postulacion.Estado">
+                            @postulacion.Vacante — @postulacion.Etapa
+                        </span>
+                    }
+                </div>
+            }
+        </header>
+
+        @if (Detalle.Resumen.OtrasCuentasEnProceso.Count > 0)
+        {
+            <div class="aviso-multicuenta">
+                Este postulante también está en proceso con:
+                <strong>@string.Join(", ", Detalle.Resumen.OtrasCuentasEnProceso)</strong>
+            </div>
+        }
+
+        <div class="hilo">
+            @foreach (var mensaje in Detalle.Mensajes)
+            {
+                <div class="mensaje @(mensaje.Direccion == "Entrante" ? "entrante" : "saliente")">
+                    <p>@mensaje.Contenido</p>
+
+                    <span class="meta">
+                        @ARegionLima(mensaje.FechaEnvio).ToString("dd/MM HH:mm")
+                        @if (mensaje.Plantilla is { } plantilla)
+                        {
+                            <span class="etiqueta-plantilla">@plantilla</span>
+                        }
+                        @* Sin analista es el bot: conviene distinguirlo de una respuesta humana. *@
+                        else if (mensaje.Direccion == "Saliente" && mensaje.AnalistaId is null)
+                        {
+                            <span class="etiqueta-bot">bot</span>
+                        }
+                    </span>
+                </div>
+            }
+        </div>
+
+        <CajaRespuesta Detalle="Detalle" AlEnviar="Recargar" />
+    }
+</div>
+
+@code {
+    [Parameter] public ConversacionDetalle? Detalle { get; set; }
+    [Parameter] public EventCallback AlCambiar { get; set; }
+
+    private Task Recargar() => AlCambiar.InvokeAsync();
+
+    private static DateTime ARegionLima(DateTime utc) => utc.AddHours(-5);
+}

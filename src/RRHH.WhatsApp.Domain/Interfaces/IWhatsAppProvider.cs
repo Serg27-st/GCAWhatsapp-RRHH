@@ -1,4 +1,5 @@
 using RRHH.WhatsApp.Domain.Entidades;
+using RRHH.WhatsApp.Domain.Enums;
 
 namespace RRHH.WhatsApp.Domain.Interfaces;
 
@@ -11,7 +12,35 @@ public sealed record MensajeEntranteDto(
     string? IdBotonPulsado,
     DateTime FechaUtc);
 
-public sealed record ResultadoEnvio(bool Exito, string? ProviderMessageId, string? Error);
+/// <summary>
+/// Resultado de un envio. <paramref name="Clase"/> es lo que permite decidir si reintentar:
+/// sin ella, cualquier reintento seria a ciegas y podria duplicar un mensaje que ya salio.
+/// </summary>
+public sealed record ResultadoEnvio(
+    bool Exito,
+    string? ProviderMessageId,
+    string? Error,
+    ClaseFallo Clase = ClaseFallo.Ninguno)
+{
+    public static ResultadoEnvio Ok(string? providerMessageId) => new(true, providerMessageId, null);
+
+    /// <summary>Rechazo sin procesar: el mensaje no salio y reintentarlo es seguro.</summary>
+    public static ResultadoEnvio Transitorio(string error) => new(false, null, error, ClaseFallo.Transitorio);
+
+    /// <summary>Reintentarlo daria exactamente el mismo resultado.</summary>
+    public static ResultadoEnvio Permanente(string error) => new(false, null, error, ClaseFallo.Permanente);
+
+    /// <summary>Se perdio la respuesta: puede haber salido o no.</summary>
+    public static ResultadoEnvio Ambiguo(string error) => new(false, null, error, ClaseFallo.Ambiguo);
+}
+
+/// <summary>Acuse de entrega de un mensaje que ya salio, para actualizar Mensajes.EstadoEntrega.</summary>
+public sealed record EstadoEntregaDto(
+    string ProviderMessageId,
+    string Estado,
+    string? CodigoError,
+    string? DescripcionError,
+    DateTime FechaUtc);
 
 /// <summary>Boton del menu de empresas que arma el bot (Regla 19: botones, no texto libre).</summary>
 public sealed record BotonRespuesta(string Id, string Titulo);
@@ -36,10 +65,22 @@ public interface IWhatsAppProvider
         IReadOnlyList<string> parametros,
         CancellationToken ct = default);
 
+    /// <summary>Hasta 3 opciones. Con mas, WhatsApp exige una lista.</summary>
     Task<ResultadoEnvio> EnviarBotonesAsync(
         string telefonoE164,
         string texto,
         IReadOnlyList<BotonRespuesta> botones,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Menu desplegable. WhatsApp admite hasta 10 filas en total, lo que fija el techo del menu
+    /// de empresas de la Regla 19.
+    /// </summary>
+    Task<ResultadoEnvio> EnviarListaAsync(
+        string telefonoE164,
+        string texto,
+        string textoBoton,
+        IReadOnlyList<BotonRespuesta> opciones,
         CancellationToken ct = default);
 
     /// <summary>Valida la firma de la peticion antes de procesar nada. El Gateway no confia en el cuerpo sin esto.</summary>
@@ -47,4 +88,11 @@ public interface IWhatsAppProvider
 
     /// <summary>Traduce el payload propio del proveedor a la forma normalizada del dominio.</summary>
     IReadOnlyList<MensajeEntranteDto> InterpretarWebhook(string cuerpoCrudo);
+
+    /// <summary>
+    /// Acuses de entrega presentes en el mismo payload. Van aparte de los mensajes entrantes
+    /// porque no abren la ventana de 24h ni cuentan como opt-in: solo actualizan el estado de
+    /// un mensaje que ya salio.
+    /// </summary>
+    IReadOnlyList<EstadoEntregaDto> InterpretarEstados(string cuerpoCrudo);
 }

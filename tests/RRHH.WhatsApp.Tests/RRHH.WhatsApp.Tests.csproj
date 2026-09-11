@@ -24,6 +24,8 @@
     <ProjectReference Include="..\..\src\RRHH.WhatsApp.Domain\RRHH.WhatsApp.Domain.csproj" />
     <ProjectReference Include="..\..\src\RRHH.WhatsApp.Application\RRHH.WhatsApp.Application.csproj" />
     <ProjectReference Include="..\..\src\RRHH.WhatsApp.Infrastructure\RRHH.WhatsApp.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\RRHH.WhatsApp.Reporting\RRHH.WhatsApp.Reporting.csproj" />
+    <ProjectReference Include="..\..\src\RRHH.WhatsApp.Api\RRHH.WhatsApp.Api.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,144 @@
+@inject ClienteApi Api
+@inject SesionAnalista Sesion
+
+@* Regla 15 vista desde la bandeja: dentro de la ventana se escribe libre, fuera hay que elegir
+   plantilla. La Api decide; esta caja solo refleja lo que responde. *@
+<div class="caja-respuesta">
+    @if (!Sesion.Activa)
+    {
+        <p class="aviso">Tu sesión expiró. Volvé a entrar.</p>
+    }
+    else
+    {
+        @if (!Detalle.Resumen.VentanaAbierta)
+        {
+            <div class="aviso ventana">
+                Pasaron más de 24 horas desde el último mensaje del postulante.
+                Solo se puede responder con una plantilla aprobada por Meta.
+            </div>
+        }
+
+        <div class="fila-plantilla">
+            <select class="form-select" @bind="_clavePlantilla" @bind:after="CargarParametros">
+                <option value="">Texto libre</option>
+
+                @foreach (var plantilla in _plantillas.Where(p => p.Activa))
+                {
+                    <option value="@plantilla.Clave">@plantilla.Clave (@plantilla.Categoria)</option>
+                }
+            </select>
+
+            @* Una plantilla sin aprobar no se puede usar: conviene que se vea por que. *@
+            @if (_plantillas.Any(p => !p.Activa))
+            {
+                <span class="nota">
+                    @_plantillas.Count(p => !p.Activa) plantilla(s) esperando aprobación de Meta
+                </span>
+            }
+        </div>
+
+        @if (string.IsNullOrEmpty(_clavePlantilla))
+        {
+            <textarea class="form-control" rows="3" placeholder="Escribí tu respuesta…"
+                      @bind="_texto" @bind:event="oninput" disabled="@_enviando"></textarea>
+        }
+        else
+        {
+            <div class="parametros">
+                @for (var i = 0; i < _parametros.Count; i++)
+                {
+                    var indice = i;
+                    <input class="form-control" placeholder="@($"Parámetro {indice + 1}")"
+                           value="@_parametros[indice]"
+                           @onchange="e => _parametros[indice] = e.Value?.ToString() ?? string.Empty" />
+                }
+
+                @if (TextoDePlantilla() is { } vista)
+                {
+                    <p class="vista-previa">@vista</p>
+                }
+            </div>
+        }
+
+        <div class="acciones-envio">
+            <button class="btn btn-primary" @onclick="Enviar" disabled="@(_enviando || !PuedeEnviar())">
+                @(_enviando ? "Enviando…" : "Responder")
+            </button>
+
+            <AccionesRapidas Detalle="Detalle" AlCambiar="AlEnviar" />
+        </div>
+
+        @if (_resultado is { Enviado: false, Motivo: { } motivo })
+        {
+            <p class="error">@motivo</p>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ConversacionDetalle Detalle { get; set; } = default!;
+    [Parameter] public EventCallback AlEnviar { get; set; }
+
+    private IReadOnlyList<PlantillaResumen> _plantillas = [];
+    private List<string> _parametros = [];
+    private string _texto = string.Empty;
+    private string _clavePlantilla = string.Empty;
+    private bool _enviando;
+    private ResultadoResponder? _resultado;
+
+    protected override async Task OnInitializedAsync() => _plantillas = await Api.PlantillasAsync();
+
+    private PlantillaResumen? Elegida() =>
+        _plantillas.FirstOrDefault(p => p.Clave == _clavePlantilla);
+
+    private void CargarParametros() =>
+        _parametros = Elegida() is { } plantilla
+            ? [.. Enumerable.Repeat(string.Empty, plantilla.Parametros)]
+            : [];
+
+    /// <summary>Reemplaza los marcadores {{1}}, {{2}} para que el analista vea lo que va a salir.</summary>
+    private string? TextoDePlantilla()
+    {
+        if (Elegida() is not { } plantilla)
+            return null;
+
+        var texto = plantilla.TextoAprobado;
+
+        for (var i = 0; i < _parametros.Count; i++)
+        {
+            var valor = string.IsNullOrWhiteSpace(_parametros[i]) ? $"{{{{{i + 1}}}}}" : _parametros[i];
+            texto = texto.Replace($"{{{{{i + 1}}}}}", valor);
+        }
+
+        return texto;
+    }
+
+    private bool PuedeEnviar() =>
+        string.IsNullOrEmpty(_clavePlantilla)
+            ? !string.IsNullOrWhiteSpace(_texto)
+            : _parametros.All(p => !string.IsNullOrWhiteSpace(p));
+
+    private async Task Enviar()
+    {
+        if (Sesion.AnalistaId is not { } analistaId)
+            return;
+
+        _enviando = true;
+
+        _resultado = await Api.ResponderAsync(Detalle.Resumen.ConversacionId, new PeticionResponder(
+            string.IsNullOrEmpty(_clavePlantilla) ? _texto : null,
+            string.IsNullOrEmpty(_clavePlantilla) ? null : _clavePlantilla,
+            string.IsNullOrEmpty(_clavePlantilla) ? null : _parametros));
+
+        _enviando = false;
+
+        if (_resultado.Enviado)
+        {
+            _texto = string.Empty;
+            _clavePlantilla = string.Empty;
+            _parametros = [];
+
+            await AlEnviar.InvokeAsync();
+        }
+    }
+}

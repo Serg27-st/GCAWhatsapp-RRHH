@@ -29,6 +29,7 @@ public class AnalistaConfig : IEntityTypeConfiguration<Analista>
         b.Property(x => x.Nombre).HasMaxLength(150).IsRequired();
         b.Property(x => x.Email).HasMaxLength(200).IsRequired();
         b.Property(x => x.Rol).HasConversion<int>();
+        b.Property(x => x.HashContrasena).HasMaxLength(400);
         b.HasIndex(x => x.Email).IsUnique();
     }
 }
@@ -44,10 +45,16 @@ public class AnalistaCuentaConfig : IEntityTypeConfiguration<AnalistaCuenta>
         b.HasIndex(x => new { x.AnalistaId, x.CuentaId }).IsUnique();
 
         // Regla 2: el respaldo es fijo por cuenta, asi que solo puede haber uno.
-        b.HasIndex(x => x.CuentaId)
+        b.HasIndex(x => x.CuentaId, "IX_AnalistaCuenta_RespaldoUnicoPorCuenta")
             .HasFilter("[EsBackup] = 1")
-            .IsUnique()
-            .HasDatabaseName("IX_AnalistaCuenta_RespaldoUnicoPorCuenta");
+            .IsUnique();
+
+        // Regla 1: el titular tambien es uno solo por cuenta. Sin este indice, dos titulares
+        // dejarian el enrutamiento eligiendo uno de forma arbitraria, y el que quedara afuera
+        // nunca veria las conversaciones de su cuenta.
+        b.HasIndex(x => x.CuentaId, "IX_AnalistaCuenta_TitularUnicoPorCuenta")
+            .HasFilter("[EsBackup] = 0")
+            .IsUnique();
 
         b.HasOne(x => x.Analista).WithMany(x => x.Cuentas)
             .HasForeignKey(x => x.AnalistaId).OnDelete(DeleteBehavior.Restrict);
@@ -241,6 +248,7 @@ public class MensajeConfig : IEntityTypeConfiguration<Mensaje>
         b.Property(x => x.Contenido).HasMaxLength(4096).IsRequired();
         b.Property(x => x.ProviderMessageId).HasMaxLength(150);
         b.Property(x => x.ErrorProveedor).HasMaxLength(500);
+        b.Property(x => x.ParametrosPlantillaJson).HasMaxLength(2000);
 
         // Idempotencia (Seccion 9.6.2): Meta reintenta la entrega y no debemos procesar dos veces.
         // El filtro permite que los salientes aun sin id del proveedor convivan como NULL.
@@ -250,6 +258,14 @@ public class MensajeConfig : IEntityTypeConfiguration<Mensaje>
 
         b.HasIndex(x => new { x.ConversacionId, x.FechaEnvio });
         b.HasIndex(x => x.CorrelationId);
+
+        b.Property(x => x.ClaseFallo).HasConversion<int>();
+
+        // Barrido de reintentos del Worker: solo mira lo fallido con un intento ya vencido, asi
+        // que el indice se filtra para no cargar el historico entero de mensajes.
+        b.HasIndex(x => new { x.EstadoEntrega, x.ClaseFallo, x.ProximoIntentoUtc })
+            .HasFilter("[ProximoIntentoUtc] IS NOT NULL")
+            .HasDatabaseName("IX_Mensajes_PendientesDeReintento");
 
         b.HasOne(x => x.Conversacion).WithMany(x => x.Mensajes)
             .HasForeignKey(x => x.ConversacionId).OnDelete(DeleteBehavior.Cascade);
@@ -382,5 +398,20 @@ public class AuditoriaConfig : IEntityTypeConfiguration<Auditoria>
         b.Property(x => x.Accion).HasMaxLength(100).IsRequired();
         b.Property(x => x.Detalle).HasMaxLength(2000);
         b.HasIndex(x => new { x.EntidadTipo, x.EntidadId, x.Fecha });
+    }
+}
+
+/// <summary>
+/// Señal de vida de los bucles del Worker (Sección 9.6.2). Una fila por bucle: el nombre es la
+/// clave porque no interesa el historial, solo el último latido.
+/// </summary>
+public class LatidoServicioConfig : IEntityTypeConfiguration<LatidoServicio>
+{
+    public void Configure(EntityTypeBuilder<LatidoServicio> b)
+    {
+        b.ToTable("LatidosServicio");
+        b.HasKey(x => x.Servicio);
+        b.Property(x => x.Servicio).HasMaxLength(80);
+        b.Property(x => x.Detalle).HasMaxLength(300);
     }
 }

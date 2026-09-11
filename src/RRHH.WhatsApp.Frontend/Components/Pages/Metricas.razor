@@ -1,0 +1,123 @@
+@page "/metricas"
+@rendermode InteractiveServer
+@inject ClienteApi Api
+
+<PageTitle>Métricas</PageTitle>
+
+@* Regla 18: el panel de gerencia. *@
+<div class="metricas">
+    <header>
+        <h1>Panel de gerencia</h1>
+
+        <div class="periodo">
+            <input type="date" class="form-control" @bind="_desde" />
+            <input type="date" class="form-control" @bind="_hasta" />
+            <button class="btn btn-primary" @onclick="Cargar">Actualizar</button>
+        </div>
+    </header>
+
+    @if (_metricas is null)
+    {
+        <p class="vacio">Cargando…</p>
+    }
+    else
+    {
+        <section class="tarjetas">
+            <div class="tarjeta-metrica">
+                <h3>Primera respuesta</h3>
+                <p class="numero">@Duracion(_metricas.Respuesta.MinutosPromedio)</p>
+                <span class="detalle">mediana @Duracion(_metricas.Respuesta.MinutosMediana)</span>
+                <span class="detalle">@_metricas.Respuesta.DentroDelPlazo dentro del plazo</span>
+                <span class="detalle">@_metricas.Respuesta.ConversacionesSinResponder sin responder</span>
+            </div>
+
+            <div class="tarjeta-metrica">
+                <h3>Conversión</h3>
+                <p class="numero">@_metricas.Conversion.TasaConversion.ToString("P1")</p>
+                <span class="detalle">@_metricas.Conversion.Contratados de @_metricas.Conversion.Postulaciones</span>
+                <span class="detalle">@_metricas.Conversion.EnProceso en proceso</span>
+            </div>
+
+            <div class="tarjeta-metrica">
+                <h3>Escalamientos</h3>
+                <p class="numero">@_metricas.Respuesta.Escalamientos</p>
+                <span class="detalle">conversaciones que pasaron al respaldo</span>
+            </div>
+        </section>
+
+        <section>
+            <h2>Actividad por analista</h2>
+
+            <table class="tabla">
+                <thead>
+                    <tr>
+                        <th>Analista</th>
+                        <th>Conversaciones</th>
+                        <th>Mensajes</th>
+                        <th>1ª respuesta</th>
+                        <th>Contratados</th>
+                        <th>Descartados</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var analista in _metricas.Analistas)
+                    {
+                        <tr>
+                            <td>@analista.Nombre</td>
+                            <td>@analista.ConversacionesAtendidas</td>
+                            <td>@analista.MensajesEnviados</td>
+                            <td>@Duracion(analista.MinutosPromedioPrimeraRespuesta)</td>
+                            <td>@analista.Contratados</td>
+                            <td>@analista.Descartados</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+
+        @if (_metricas.Cuentas.Count > 0)
+        {
+            <section>
+                <h2>Por cuenta</h2>
+
+                <table class="tabla">
+                    <thead>
+                        <tr><th>Cuenta</th><th>Postulaciones</th><th>Contratados</th><th>Conversión</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var cuenta in _metricas.Cuentas)
+                        {
+                            <tr>
+                                <td>@cuenta.Nombre</td>
+                                <td>@cuenta.Postulaciones</td>
+                                <td>@cuenta.Contratados</td>
+                                <td>@cuenta.TasaConversion.ToString("P1")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private MetricasGerencia? _metricas;
+    private DateTime _desde = DateTime.UtcNow.AddDays(-30).Date;
+    private DateTime _hasta = DateTime.UtcNow.Date.AddDays(1);
+
+    protected override Task OnInitializedAsync() => Cargar();
+
+    private async Task Cargar() =>
+        _metricas = await Api.MetricasAsync(
+            DateTime.SpecifyKind(_desde, DateTimeKind.Utc),
+            DateTime.SpecifyKind(_hasta, DateTimeKind.Utc));
+
+    /// <summary>Minutos crudos no se leen bien pasada la hora; se muestran como horas y minutos.</summary>
+    private static string Duracion(double? minutos) => minutos switch
+    {
+        null => "—",
+        < 60 => $"{minutos:F0} min",
+        _ => $"{(int)(minutos / 60)} h {(int)(minutos % 60)} min"
+    };
+}

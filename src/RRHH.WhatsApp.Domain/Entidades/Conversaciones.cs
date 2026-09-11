@@ -78,12 +78,34 @@ public class Mensaje
     /// <summary>Nulo en texto libre dentro de la ventana de 24h; obligatorio fuera de ella (Regla 15).</summary>
     public int? PlantillaId { get; set; }
 
+    /// <summary>
+    /// Parametros con los que se armo la plantilla, serializados. Sin ellos un reintento no podria
+    /// reconstruir el mensaje: en <see cref="Contenido"/> queda el texto aprobado con sus {{n}}
+    /// sin reemplazar, no el mensaje final.
+    /// </summary>
+    public string? ParametrosPlantillaJson { get; set; }
+
     /// <summary>Analista que envio el mensaje. Nulo si lo genero el bot o el Worker.</summary>
     public int? AnalistaId { get; set; }
 
     public DateTime FechaEnvio { get; set; }
     public EstadoEntrega EstadoEntrega { get; set; } = EstadoEntrega.Pendiente;
     public string? ErrorProveedor { get; set; }
+
+    /// <summary>
+    /// Por que fallo el ultimo intento. Es lo que decide si el Worker puede reintentarlo:
+    /// solo <see cref="ClaseFallo.Transitorio"/> se reintenta solo.
+    /// </summary>
+    public ClaseFallo ClaseFallo { get; set; } = ClaseFallo.Ninguno;
+
+    /// <summary>Intentos de envio consumidos, para no reintentar indefinidamente.</summary>
+    public int IntentosEnvio { get; set; }
+
+    /// <summary>
+    /// Cuando corresponde el proximo intento. Nulo significa que no hay ninguno pendiente, sea
+    /// porque el envio salio bien o porque ya no se va a reintentar.
+    /// </summary>
+    public DateTime? ProximoIntentoUtc { get; set; }
 
     /// <summary>Permite rastrear un mensaje de punta a punta del flujo cuando algo falla (Seccion 9.6.2).</summary>
     public Guid CorrelationId { get; set; }

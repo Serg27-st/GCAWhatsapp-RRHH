@@ -1,0 +1,69 @@
+/* Kanban por vacante (Regla 13). */
+.tablero { padding: 1rem; }
+.tablero header { display: flex; justify-content: space-between; align-items: center; }
+.tablero h1 { margin: 0 0 0.8rem; }
+
+.columnas { display: flex; gap: 0.7rem; align-items: flex-start; overflow-x: auto; padding-bottom: 1rem; }
+
+.columna {
+    min-width: 220px;
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--borde);
+    border-radius: 6px;
+    padding: 0.6rem;
+    min-height: 160px;
+}
+
+.columna.destino { border-color: var(--acento); background: var(--acento-suave); }
+.columna h2 { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--tenue); }
+.columna .cantidad { float: right; }
+
+.tarjeta {
+    background: var(--fondo);
+    border: 1px solid var(--borde);
+    border-radius: 5px;
+    padding: 0.5rem;
+    margin-bottom: 0.4rem;
+    cursor: grab;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.tarjeta:active { cursor: grabbing; }
+.tarjeta .dni, .tarjeta .estado { font-size: 0.78rem; color: var(--tenue); }
+
+/* Metricas (Regla 18) */
+.metricas { padding: 1rem; }
+.metricas header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.7rem; }
+.metricas h1 { margin: 0; }
+.periodo { display: flex; gap: 0.5rem; align-items: center; }
+.periodo .form-control { width: auto; }
+
+.tarjetas { display: flex; gap: 0.8rem; flex-wrap: wrap; margin: 1rem 0; }
+
+.tarjeta-metrica {
+    flex: 1;
+    min-width: 200px;
+    background: var(--panel);
+    border: 1px solid var(--borde);
+    border-radius: 6px;
+    padding: 0.8rem;
+}
+
+.tarjeta-metrica h3 { margin: 0 0 0.3rem; color: var(--tenue); font-weight: 600; }
+.tarjeta-metrica .numero { margin: 0 0 0.3rem; font-size: 1.8rem; font-weight: 700; color: var(--acento); }
+.tarjeta-metrica .detalle { display: block; }
+
+.tabla { width: 100%; border-collapse: collapse; background: var(--panel); margin-bottom: 1.5rem; }
+.tabla th, .tabla td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--borde); text-align: left; }
+.tabla th { background: var(--fondo); color: var(--tenue); font-size: 0.82rem; }
+
+/* Vacantes */
+.vacantes { padding: 1rem; }
+.vacantes .cuenta { background: var(--panel); border: 1px solid var(--borde); border-radius: 6px; padding: 0.7rem; margin-bottom: 0.6rem; }
+.vacantes .cuenta h2 { margin: 0 0 0.3rem; display: flex; gap: 0.5rem; align-items: center; }
+.ir-al-tablero { display: flex; gap: 0.5rem; align-items: flex-end; margin-top: 1rem; }
+.ir-al-tablero .form-control { width: 120px; }
+.ir-al-tablero label { font-size: 0.82rem; color: var(--tenue); }
