@@ -5,7 +5,15 @@ using RRHH.WhatsApp.Domain.Interfaces;
 namespace RRHH.WhatsApp.Application.Casos;
 
 /// <summary>Lo que queda creado tras un envio valido del formulario.</summary>
-public sealed record ResultadoJobForms(int PostulanteId, int PostulacionId, int RespuestaId);
+/// <param name="YaRecibido">
+/// El formulario ya se habia recibido y este envio no cambio nada. Pasa cuando quien llama reintenta
+/// porque se perdio la respuesta (V27).
+/// </param>
+public sealed record ResultadoJobForms(
+    int PostulanteId,
+    int PostulacionId,
+    int RespuestaId,
+    bool YaRecibido = false);
 
 /// <summary>
 /// Cierra el circuito del JobForms: toma el envio del formulario, crea a la persona y su
@@ -29,6 +37,23 @@ public sealed class RecepcionJobForms(
     {
         var invitacion = await invitaciones.ObtenerPorTokenAsync(envio.Token, ct)
             ?? throw new InvalidOperationException("El enlace del formulario no corresponde a ninguna invitacion.");
+
+        // V27: quien llama reintenta cuando se pierde la respuesta, y el mismo envio llega dos veces.
+        // Sin esto quedaria una segunda respuesta guardada y el evento se publicaria de nuevo: el
+        // postulante recibiria la confirmacion por duplicado, que es el patron que el proyecto evita.
+        if (invitacion.Completado
+            && await formularios.ObtenerRespuestaDeInvitacionAsync(invitacion.InvitacionId, ct) is { } previa)
+        {
+            var postulacionPrevia = (await postulaciones.ObtenerTableroPorPostulanteAsync(previa.PostulanteId, ct))
+                .FirstOrDefault(p => p.HcId == invitacion.HcId);
+
+            log.LogInformation(
+                "JobForms repetido en la invitacion {InvitacionId}: ya estaba recibido, no se procesa de nuevo.",
+                invitacion.InvitacionId);
+
+            return new ResultadoJobForms(
+                previa.PostulanteId, postulacionPrevia?.PostulacionId ?? 0, previa.RespuestaId, YaRecibido: true);
+        }
 
         // Regla 9: el DNI es el identificador, no el telefono. La misma persona que ya postulo
         // antes se reconoce aca y no se duplica.

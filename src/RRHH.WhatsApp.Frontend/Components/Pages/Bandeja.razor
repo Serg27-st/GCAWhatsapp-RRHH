@@ -35,6 +35,8 @@
             </div>
         }
 
+        <TransferenciasRecibidas Pendientes="_transferencias" AlResponder="AlResponderTransferencia" />
+
         <div class="pestanas">
             <button class="@(_vista == Vista.Mias ? "activa" : "")" @onclick="() => Cambiar(Vista.Mias)">
                 Mis conversaciones
@@ -67,6 +69,7 @@
     private enum Vista { Mias, Pendientes, Busqueda }
 
     private IReadOnlyList<ConversacionResumen> _conversaciones = [];
+    private IReadOnlyList<TransferenciaPendiente> _transferencias = [];
     private ConversacionDetalle? _detalle;
     private Vista _vista = Vista.Mias;
     private int? _seleccionadaId;
@@ -165,6 +168,22 @@
         _detalle = await Api.DetalleAsync(conversacionId);
     }
 
+    /// <summary>
+    /// Regla 8. Si la acepto, el hilo ya es suyo: se vuelve a su bandeja y se abre, que es lo que
+    /// iba a hacer de todas formas. Si la rechazo, basta con que la tarjeta desaparezca.
+    /// </summary>
+    private async Task AlResponderTransferencia(int? conversacionAceptada)
+    {
+        if (conversacionAceptada is { } id)
+        {
+            _vista = Vista.Mias;
+            _buscando = false;
+            _seleccionadaId = id;
+        }
+
+        await RefrescarTodo();
+    }
+
     private async Task RefrescarTodo()
     {
         await RefrescarLista();
@@ -184,6 +203,10 @@
             Vista.Busqueda => await Api.BuscarPorDniAsync(_dni.Trim()),
             _ => Sesion.AnalistaId is { } id ? await Api.BandejaAsync(id) : []
         };
+
+        // Regla 8: se trae en cada vuelta, en cualquier pestana. Lo que espera respuesta tiene que
+        // estar a la vista aunque el analista este mirando otra cosa.
+        _transferencias = await Api.TransferenciasPendientesAsync();
 
         _cargando = false;
         StateHasChanged();

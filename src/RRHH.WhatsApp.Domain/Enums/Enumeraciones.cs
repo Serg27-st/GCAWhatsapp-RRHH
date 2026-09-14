@@ -1,10 +1,33 @@
 namespace RRHH.WhatsApp.Domain.Enums;
 
-/// <summary>Distingue a un analista normal del area de Sistemas, que tiene visibilidad total (Regla 4).</summary>
+/// <summary>
+/// Quien es quien en la Api. Sistemas tiene visibilidad total (Regla 4); Jefatura es el "jefe" de
+/// la Regla 14 y la gerencia de la 18, que el dossier menciona sin darle rol (V23).
+/// </summary>
 public enum RolAnalista
 {
     Analista = 1,
-    Sistemas = 2
+    Sistemas = 2,
+
+    /// <summary>Ve metricas, registra ausencias de otros y decide la cobertura de cada cuenta. No atiende conversaciones.</summary>
+    Jefatura = 3
+}
+
+/// <summary>
+/// Regla 4: que puede hacer un analista con una conversacion o con lo de una cuenta. Se separa ver
+/// de actuar porque el dossier le da a Sistemas "visibilidad total para soporte y auditoria", no la
+/// facultad de responderle al postulante en nombre de otro.
+/// </summary>
+public enum NivelAcceso
+{
+    /// <summary>No la ve. Para quien pregunta, es como si no existiera.</summary>
+    Ninguno = 0,
+
+    /// <summary>La ve, pero no responde, no transfiere ni marca: Sistemas sobre lo ajeno.</summary>
+    Lectura = 1,
+
+    /// <summary>La trabaja.</summary>
+    Total = 2
 }
 
 /// <summary>

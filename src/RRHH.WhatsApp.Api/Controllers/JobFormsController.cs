@@ -90,8 +90,13 @@ public sealed class JobFormsController(
         if (!SecretoValido())
             return Unauthorized();
 
+        // Sin token valido no hay forma de saber de que postulacion se trata. Es un rechazo
+        // del negocio, no un error del servidor: el enlace se armo mal o alguien entro sin el.
+        if (!cuerpo.TokenValido(out var token))
+            return UnprocessableEntity(new { motivo = "El enlace del formulario no trae un token valido." });
+
         var envio = new EnvioJobForms(
-            cuerpo.Token,
+            token,
             new DatosPostulanteFormulario(
                 cuerpo.Dni.Trim(), cuerpo.NombreCompleto, cuerpo.TelefonoE164, cuerpo.Email),
             cuerpo.DatosJson ?? "{}",
@@ -159,7 +164,9 @@ public sealed class JobFormsController(
         {
             var resultado = await recepcion.ProcesarAsync(envio, ct);
 
-            return Ok(new { resultado.PostulanteId, resultado.PostulacionId });
+            // YaRecibido le dice al Apps Script que su reintento llego a destino y que no hay nada
+            // que volver a mandar (V27).
+            return Ok(new { resultado.PostulanteId, resultado.PostulacionId, resultado.YaRecibido });
         }
         catch (InvalidOperationException ex)
         {
@@ -191,14 +198,22 @@ public sealed class JobFormsController(
 
     /// <summary>Lo que manda el Apps Script del formulario de Google.</summary>
     public sealed record EnvioGoogleForms(
-        Guid Token,
+        string Token,
         string Dni,
         string? NombreCompleto,
         string? TelefonoE164,
         string? Email,
         string? DatosJson,
         string? CvUrl,
-        bool ConsentimientoAceptado);
+        bool ConsentimientoAceptado)
+    {
+        /// <summary>
+        /// El token llega tal como viajo en el enlace. El sistema lo arma sin guiones y Google lo
+        /// devuelve igual, pero System.Text.Json solo entiende la forma con guiones: por eso se
+        /// recibe como texto y se interpreta aca, aceptando las dos (V27).
+        /// </summary>
+        public bool TokenValido(out Guid token) => Guid.TryParse(Token, out token);
+    }
 
     /// <summary>Misma estructura, para el formulario propio. El CV viaja aparte como archivo.</summary>
     public sealed record EnvioPropio(

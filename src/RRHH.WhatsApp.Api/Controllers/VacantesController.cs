@@ -1,6 +1,7 @@
 using RRHH.WhatsApp.Api.Seguridad;
 using Microsoft.AspNetCore.Mvc;
 using RRHH.WhatsApp.Api.Mapeo;
+using RRHH.WhatsApp.Contracts.Administracion;
 using RRHH.WhatsApp.Contracts.Bandeja;
 using RRHH.WhatsApp.Domain.Entidades;
 using RRHH.WhatsApp.Domain.Enums;
@@ -11,6 +12,11 @@ namespace RRHH.WhatsApp.Api.Controllers;
 /// <summary>
 /// Vacantes (HC) y su tablero. Sin estas rutas el estado de un HC nunca cambiaria a Cerrada y la
 /// Regla 20 no podria activarse en la practica.
+/// <para>
+/// Crear, cerrar y configurar una vacante es de quien trabaja la cuenta —titular o respaldo—, que
+/// es quien la abre y le arma el formulario; Sistemas, como soporte (V23). Una politica por rol no
+/// sabe de que cuenta es cada vacante, asi que eso se decide aca.
+/// </para>
 /// </summary>
 [ApiController]
 [Route("hc")]
@@ -25,14 +31,7 @@ public sealed class VacantesController(
     {
         var vacantes = await cuentas.ListarVacantesAbiertasAsync(cuentaId, ct);
 
-        return Ok(vacantes.Select(h => new
-        {
-            h.HcId,
-            h.CuentaId,
-            h.Titulo,
-            estado = h.Estado.ToString(),
-            tieneFormulario = !string.IsNullOrWhiteSpace(h.UrlJobForms)
-        }));
+        return Ok(vacantes.Select(AResumen));
     }
 
     [HttpPost]
@@ -41,6 +40,9 @@ public sealed class VacantesController(
     {
         if (string.IsNullOrWhiteSpace(peticion.Titulo))
             return BadRequest(new { motivo = "La vacante necesita un titulo." });
+
+        if (await RechazarSiNoTrabajaLaCuentaAsync(peticion.CuentaId, ct) is { } rechazo)
+            return rechazo;
 
         try
         {
@@ -55,13 +57,7 @@ public sealed class VacantesController(
                     "La vacante {HcId} se creo sin UrlJobForms: el bot no podra enviar su enlace.", vacante.HcId);
             }
 
-            return CreatedAtAction(nameof(Listar), new { cuentaId = vacante.CuentaId }, new
-            {
-                vacante.HcId,
-                vacante.Titulo,
-                estado = vacante.Estado.ToString(),
-                tieneFormulario = !string.IsNullOrWhiteSpace(vacante.UrlJobForms)
-            });
+            return CreatedAtAction(nameof(Listar), new { cuentaId = vacante.CuentaId }, AResumen(vacante));
         }
         catch (InvalidOperationException ex)
         {
@@ -73,6 +69,14 @@ public sealed class VacantesController(
     [HttpPatch("{id:int}/cerrar")]
     public async Task<IActionResult> Cerrar(int id, CancellationToken ct)
     {
+        var vacante = await cuentas.ObtenerVacanteAsync(id, ct);
+
+        if (vacante is null)
+            return NotFound(new { motivo = $"No existe la vacante {id}." });
+
+        if (await RechazarSiNoTrabajaLaCuentaAsync(vacante.CuentaId, ct) is { } rechazo)
+            return rechazo;
+
         try
         {
             await cuentas.CerrarVacanteAsync(id, User.AnalistaId(), ct);
@@ -108,10 +112,17 @@ public sealed class VacantesController(
     [HttpPut("{id:int}/campos")]
     public async Task<IActionResult> GuardarCampos(
         int id,
-        
         [FromBody] IReadOnlyList<CampoOpcional> campos,
         CancellationToken ct)
     {
+        var vacante = await cuentas.ObtenerVacanteAsync(id, ct);
+
+        if (vacante is null)
+            return NotFound(new { motivo = $"No existe la vacante {id}." });
+
+        if (await RechazarSiNoTrabajaLaCuentaAsync(vacante.CuentaId, ct) is { } rechazo)
+            return rechazo;
+
         var convertidos = new List<HcCampoOpcional>();
 
         foreach (var campo in campos)
@@ -145,6 +156,7 @@ public sealed class VacantesController(
             return UnprocessableEntity(new { motivo = ex.Message });
         }
     }
+
     /// <summary>Regla 13: el tablero de la vacante, con todas sus columnas.</summary>
     [HttpGet("{id:int}/tablero")]
     public async Task<IActionResult> Tablero(int id, CancellationToken ct)
@@ -153,8 +165,15 @@ public sealed class VacantesController(
         // creado no tiene ninguna, y aun asi tiene que poder encabezarse.
         var vacante = await cuentas.ObtenerVacanteAsync(id, ct);
 
-        if (vacante is null)
-            return NotFound(new { motivo = $"No existe la vacante {id}." });
+        // Regla 4 por cuenta: el tablero muestra nombre y DNI de cada postulante, asi que lo ven el
+        // titular y el respaldo de la cuenta, y Sistemas. Vacante inexistente y ajena responden
+        // igual, para que el id no sirva para averiguar que vacantes tienen otras cuentas.
+        var nivel = vacante is null
+            ? NivelAcceso.Ninguno
+            : await cuentas.ObtenerAccesoAsync(vacante.CuentaId, User.AnalistaId(), ct);
+
+        if (ResultadoAcceso.Evaluar(nivel, actua: false, "el tablero") is { } rechazo)
+            return rechazo;
 
         var etapas = await postulaciones.ListarEtapasAsync(ct);
         var tarjetas = await postulaciones.ObtenerTableroAsync(id, ct);
@@ -169,6 +188,30 @@ public sealed class VacantesController(
                 [.. porEtapa[e.EtapaId].Select(p => p.AResumen())]))
             .ToList();
 
-        return Ok(new TableroKanban(id, vacante.Titulo, columnas));
+        return Ok(new TableroKanban(id, vacante!.Titulo, columnas));
+    }
+
+    /// <summary>Sin formulario el bot no puede mandar el enlace (Regla 9): la pantalla lo marca.</summary>
+    private static VacanteResumen AResumen(Hc vacante) =>
+        new(vacante.HcId, vacante.CuentaId, vacante.Titulo, vacante.Estado.ToString(),
+            !string.IsNullOrWhiteSpace(vacante.UrlJobForms));
+
+    /// <summary>
+    /// Nulo si quien pide trabaja la cuenta o es Sistemas. Aca un 403 no revela nada: la lista de
+    /// cuentas y sus vacantes abiertas es visible para todos.
+    /// </summary>
+    private async Task<IActionResult?> RechazarSiNoTrabajaLaCuentaAsync(int cuentaId, CancellationToken ct)
+    {
+        if (User.EsSistemas())
+            return null;
+
+        var nivel = await cuentas.ObtenerAccesoAsync(cuentaId, User.AnalistaId(), ct);
+
+        return nivel == NivelAcceso.Total
+            ? null
+            : StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                motivo = "Las vacantes de una cuenta las manejan su titular, su respaldo o Sistemas."
+            });
     }
 }

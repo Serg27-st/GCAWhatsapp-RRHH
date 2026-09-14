@@ -59,11 +59,3 @@
 .tabla { width: 100%; border-collapse: collapse; background: var(--panel); margin-bottom: 1.5rem; }
 .tabla th, .tabla td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--borde); text-align: left; }
 .tabla th { background: var(--fondo); color: var(--tenue); font-size: 0.82rem; }
-
-/* Vacantes */
-.vacantes { padding: 1rem; }
-.vacantes .cuenta { background: var(--panel); border: 1px solid var(--borde); border-radius: 6px; padding: 0.7rem; margin-bottom: 0.6rem; }
-.vacantes .cuenta h2 { margin: 0 0 0.3rem; display: flex; gap: 0.5rem; align-items: center; }
-.ir-al-tablero { display: flex; gap: 0.5rem; align-items: flex-end; margin-top: 1rem; }
-.ir-al-tablero .form-control { width: 120px; }
-.ir-al-tablero label { font-size: 0.82rem; color: var(--tenue); }

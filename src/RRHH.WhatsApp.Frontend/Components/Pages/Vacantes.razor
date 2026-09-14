@@ -5,23 +5,37 @@
 
 <PageTitle>Vacantes</PageTitle>
 
-@* Punto de entrada al tablero: el kanban es por vacante, no por cuenta (Regla 13). *@
-<div class="vacantes">
-    <h1>Vacantes abiertas</h1>
+@* Reglas 9, 13 y 20: las vacantes las abre, configura y cierra quien trabaja la cuenta —titular o
+   respaldo—, y Sistemas como soporte (V23). El kanban es por vacante, asi que el tablero se abre
+   desde aca. *@
+<div class="admin">
+    <h1>Vacantes</h1>
 
     @if (!Sesion.Activa)
     {
         <p class="vacio">Tu sesión expiró. Volvé a entrar.</p>
     }
+    else if (_cargando)
+    {
+        <p class="vacio">Cargando…</p>
+    }
     else if (_cuentas.Count == 0)
     {
-        <p class="vacio">Este analista no tiene cuentas asignadas.</p>
+        <p class="vacio">No tenés cuentas asignadas. Las vacantes las manejan el titular y el respaldo de cada cuenta.</p>
     }
     else
     {
+        @if (_mensaje is { } mensaje)
+        {
+            <p class="@(_esError ? "error" : "ok")">@mensaje</p>
+        }
+
         @foreach (var cuenta in _cuentas)
         {
-            <section class="cuenta">
+            var vacantes = _vacantes[cuenta.CuentaId];
+            var borrador = _borradores[cuenta.CuentaId];
+
+            <section @key="cuenta.CuentaId">
                 <h2>
                     @cuenta.Nombre
                     @if (cuenta.EsBackup)
@@ -30,32 +44,184 @@
                     }
                 </h2>
 
-                @if (cuenta.VacantesAbiertas == 0)
+                @if (vacantes.Count == 0)
                 {
-                    <p class="vacio">Sin vacantes abiertas.</p>
+                    @* Regla 20: una cuenta sin vacantes abiertas no aparece en el menu del bot. *@
+                    <p class="detalle">Sin vacantes abiertas: la cuenta no aparece en el menú del bot.</p>
                 }
                 else
                 {
-                    <p class="detalle">@cuenta.VacantesAbiertas vacante(s) abierta(s)</p>
+                    <table class="tabla">
+                        <thead>
+                            <tr><th>Vacante</th><th>Formulario</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var vacante in vacantes)
+                            {
+                                <tr @key="vacante.HcId">
+                                    <td>@vacante.Titulo</td>
+                                    <td>
+                                        @if (vacante.TieneFormulario)
+                                        {
+                                            <span class="detalle">cargado</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="chip sin-formulario"
+                                                  title="Sin formulario el bot no puede mandar el enlace (Regla 9)">sin formulario</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        <div class="acciones">
+                                            <a class="btn" href="@($"/tablero/{vacante.HcId}")">Tablero</a>
+                                            <button class="btn" @onclick="() => AlternarCampos(vacante.HcId)">Campos</button>
+
+                                            @if (_cerrando == vacante.HcId)
+                                            {
+                                                <span>¿Cerrarla?</span>
+                                                <button class="btn btn-outline-danger" @onclick="() => Cerrar(vacante)">Sí, cerrar</button>
+                                                <button class="btn btn-link" @onclick="() => _cerrando = null">No</button>
+                                            }
+                                            else
+                                            {
+                                                <button class="btn btn-outline-danger" @onclick="() => _cerrando = vacante.HcId">Cerrar</button>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+
+                                @if (_camposDe == vacante.HcId)
+                                {
+                                    <tr>
+                                        <td colspan="3"><EditorCampos HcId="vacante.HcId" /></td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
                 }
+
+                <form class="fila-form" @onsubmit="() => Crear(cuenta)" @onsubmit:preventDefault="true">
+                    <label>
+                        Nueva vacante
+                        <input class="form-control" @bind="borrador.Titulo" @bind:event="oninput"
+                               placeholder="Operario de planta" />
+                    </label>
+                    <label>
+                        Enlace del formulario
+                        <input class="form-control" @bind="borrador.UrlJobForms" placeholder="https://docs.google.com/forms/…&entry.123456={token}" />
+                    </label>
+                    <button class="btn btn-primary" type="submit" disabled="@(string.IsNullOrWhiteSpace(borrador.Titulo))">
+                        Crear
+                    </button>
+                </form>
+                <p class="detalle">
+                    Con Google Forms va el <strong>enlace prellenado</strong>, con <code>{token}</code> en lugar del
+                    valor de la pregunta <em>token</em>: ahí es donde el bot pone el token de cada postulante.
+                </p>
             </section>
         }
-
-        <div class="ir-al-tablero">
-            <label for="hc">Abrir el tablero de la vacante</label>
-            <input id="hc" type="number" class="form-control" @bind="_hcId" min="1" />
-            <a class="btn btn-primary" href="@($"/tablero/{_hcId}")">Ver tablero</a>
-        </div>
     }
 </div>
 
 @code {
     private IReadOnlyList<CuentaDeAnalista> _cuentas = [];
-    private int _hcId = 1;
+    private readonly Dictionary<int, IReadOnlyList<VacanteResumen>> _vacantes = new();
+    private readonly Dictionary<int, BorradorVacante> _borradores = new();
+    private bool _cargando = true;
+    private int? _camposDe;
+    private int? _cerrando;
+    private string? _mensaje;
+    private bool _esError;
 
-    protected override async Task OnInitializedAsync()
+    protected override Task OnInitializedAsync() => CargarAsync();
+
+    private async Task CargarAsync()
     {
-        if (Sesion.AnalistaId is { } id)
+        _cargando = true;
+
+        if (Sesion.EsSistemas)
+        {
+            // Sistemas no tiene cuentas propias: como soporte, ve todas las activas.
+            var todas = await Api.CuentasAsync();
+
+            _cuentas = [.. todas
+                .Where(c => c.Activo)
+                .Select(c => new CuentaDeAnalista(c.CuentaId, c.Nombre, false, c.VacantesAbiertas))];
+        }
+        else if (Sesion.AnalistaId is { } id)
+        {
             _cuentas = await Api.CuentasDeAnalistaAsync(id);
+        }
+
+        foreach (var cuenta in _cuentas)
+        {
+            _vacantes[cuenta.CuentaId] = await Api.VacantesAsync(cuenta.CuentaId);
+            _borradores.TryAdd(cuenta.CuentaId, new BorradorVacante());
+        }
+
+        _cargando = false;
+    }
+
+    private void AlternarCampos(int hcId) => _camposDe = _camposDe == hcId ? null : hcId;
+
+    private async Task Crear(CuentaDeAnalista cuenta)
+    {
+        var borrador = _borradores[cuenta.CuentaId];
+
+        var respuesta = await Api.CrearVacanteAsync(new PeticionCrearVacante(
+            cuenta.CuentaId, borrador.Titulo.Trim(), Vacio(borrador.UrlJobForms)));
+
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        // Regla 9: sin enlace el bot no puede mandar el formulario. Se dice ahora, no cuando el
+        // primer postulante elija esta vacante y no reciba nada.
+        Informar(string.IsNullOrWhiteSpace(borrador.UrlJobForms)
+            ? $"Vacante creada en {cuenta.Nombre}, sin formulario: el bot no va a poder mandar el enlace."
+            : $"Vacante creada en {cuenta.Nombre}.");
+
+        _borradores[cuenta.CuentaId] = new BorradorVacante();
+
+        await CargarAsync();
+    }
+
+    private async Task Cerrar(VacanteResumen vacante)
+    {
+        _cerrando = null;
+
+        var respuesta = await Api.CerrarVacanteAsync(vacante.HcId);
+
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        // Regla 20: el bot deja de ofrecerla y el enlace deja de aceptar envios, pero el formulario
+        // de Google hay que apagarlo a mano: nada deja hacerlo desde aca (docs/decisiones.md).
+        Informar($"\"{vacante.Titulo}\" cerrada: el bot ya no la ofrece. Recordá desactivar el formulario de Google a mano.");
+
+        if (_camposDe == vacante.HcId)
+            _camposDe = null;
+
+        await CargarAsync();
+    }
+
+    private void Informar(string? mensaje, bool error = false)
+    {
+        _mensaje = mensaje ?? "No se pudo hacer.";
+        _esError = error;
+    }
+
+    private static string? Vacio(string valor) => string.IsNullOrWhiteSpace(valor) ? null : valor.Trim();
+
+    private sealed class BorradorVacante
+    {
+        public string Titulo { get; set; } = string.Empty;
+        public string UrlJobForms { get; set; } = string.Empty;
     }
 }

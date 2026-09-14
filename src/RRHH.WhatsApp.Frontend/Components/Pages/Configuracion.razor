@@ -1,0 +1,266 @@
+@page "/configuracion"
+@rendermode InteractiveServer
+@inject ClienteApi Api
+@inject SesionAnalista Sesion
+
+<PageTitle>Configuración</PageTitle>
+
+@* V23: la estructura del sistema es de Sistemas. La Api lo exige igual. *@
+<div class="admin">
+    <h1>Configuración</h1>
+
+    @if (!Sesion.EsSistemas)
+    {
+        <p class="vacio">Esta pantalla es de Sistemas.</p>
+    }
+    else
+    {
+        <section>
+            <h2>Horario de atención</h2>
+            <p class="detalle">
+                Fuera de este horario el bot avisa cuándo se atiende (Regla 3). Si el escalamiento corre solo en
+                horario laboral, las 2 horas de la Regla 2 cuentan únicamente dentro de él.
+            </p>
+
+            <div class="fila-form">
+                <label>
+                    Para
+                    <select class="form-select" @bind="_ambito" @bind:after="CargarHorario">
+                        <option value="0">Horario general</option>
+                        @foreach (var cuenta in _cuentas)
+                        {
+                            <option value="@cuenta.CuentaId">@cuenta.Nombre</option>
+                        }
+                    </select>
+                </label>
+            </div>
+
+            @if (_horario?.Descripcion is { Length: > 0 } descripcion)
+            {
+                <p class="detalle">Vigente: @descripcion</p>
+            }
+
+            @foreach (var tramo in _tramos)
+            {
+                <div class="fila-form">
+                    <select class="form-select" @bind="tramo.Dia">
+                        @foreach (var dia in Dias)
+                        {
+                            <option value="@dia">@NombreDia(dia)</option>
+                        }
+                    </select>
+                    <input type="time" class="form-control" @bind="tramo.Inicio" />
+                    <input type="time" class="form-control" @bind="tramo.Fin" />
+                    <button class="btn btn-link" @onclick="() => _tramos.Remove(tramo)">quitar</button>
+                </div>
+            }
+
+            <div class="acciones fila-form">
+                <button class="btn" @onclick="AgregarTramo">Agregar tramo</button>
+                <button class="btn btn-primary" @onclick="GuardarHorario">Guardar horario</button>
+            </div>
+
+            @if (_mensajeHorario is { } mensajeHorario)
+            {
+                <p class="@(_errorHorario ? "error" : "ok")">@mensajeHorario</p>
+            }
+        </section>
+
+        <section>
+            <h2>Parámetros de las reglas</h2>
+            <p class="detalle">
+                Se aplican sin reiniciar nada. El valor nuevo tiene que ser del mismo tipo que el actual, y un número
+                no puede ser cero.
+            </p>
+
+            <table class="tabla">
+                <thead>
+                    <tr><th>Parámetro</th><th>Valor</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var parametro in _parametros)
+                    {
+                        <tr @key="parametro.Clave">
+                            <td>
+                                <strong>@parametro.Clave</strong>
+                                @if (parametro.Descripcion is { } descripcionParametro)
+                                {
+                                    <span class="detalle bloque">@descripcionParametro</span>
+                                }
+                                @if (EsRiesgoso(parametro.Clave))
+                                {
+                                    <span class="riesgo">Subirlo aumenta el riesgo de que Meta vuelva a bloquear la línea (Sección 2.4).</span>
+                                }
+                            </td>
+                            <td><input class="form-control" @bind="_valores[parametro.Clave]" @bind:event="oninput" /></td>
+                            <td>
+                                <button class="btn" disabled="@(_valores[parametro.Clave] == parametro.Valor)"
+                                        @onclick="() => GuardarParametro(parametro)">Guardar</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (_mensajeParametros is { } mensajeParametros)
+            {
+                <p class="@(_errorParametros ? "error" : "ok")">@mensajeParametros</p>
+            }
+        </section>
+
+        <section>
+            <h2>Plantillas</h2>
+            <p class="detalle">
+                Una plantilla se activa recién cuando Meta la aprueba, y se marca a mano en la base
+                (<code>Plantillas.Activa</code>). No se activa desde acá a propósito: enviar una plantilla sin aprobar
+                es justo lo que provoca bloqueos (V8).
+            </p>
+
+            <table class="tabla">
+                <thead>
+                    <tr><th>Clave</th><th>Nombre en Meta</th><th>Categoría</th><th>Estado</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var plantilla in _plantillas)
+                    {
+                        <tr @key="plantilla.PlantillaId">
+                            <td>@plantilla.Clave</td>
+                            <td>@plantilla.NombreMeta</td>
+                            <td>@plantilla.Categoria</td>
+                            <td>
+                                @if (plantilla.Activa)
+                                {
+                                    <span class="detalle">aprobada</span>
+                                }
+                                else
+                                {
+                                    <span class="chip sin-formulario">esperando a Meta</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
+</div>
+
+@code {
+    private static readonly DayOfWeek[] Dias =
+    [
+        DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday,
+        DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday
+    ];
+
+    private IReadOnlyList<CuentaDetalle> _cuentas = [];
+    private int _ambito;
+    private HorarioVigente? _horario;
+    private List<FilaTramo> _tramos = [];
+    private IReadOnlyList<ParametroRegla> _parametros = [];
+    private readonly Dictionary<string, string> _valores = new();
+    private IReadOnlyList<PlantillaResumen> _plantillas = [];
+    private string? _mensajeHorario;
+    private bool _errorHorario;
+    private string? _mensajeParametros;
+    private bool _errorParametros;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Sesion.EsSistemas)
+            return;
+
+        _cuentas = await Api.CuentasAsync();
+        _plantillas = await Api.PlantillasAsync();
+
+        await CargarHorario();
+        await CargarParametros();
+    }
+
+    private int? Cuenta => _ambito == 0 ? null : _ambito;
+
+    private async Task CargarHorario()
+    {
+        _horario = await Api.HorarioAsync(Cuenta);
+        _mensajeHorario = null;
+
+        _tramos = [.. (_horario?.Tramos ?? Array.Empty<TramoHorario>())
+            .OrderBy(t => Orden(t.DiaSemana))
+            .ThenBy(t => t.HoraInicio)
+            .Select(t => new FilaTramo { Dia = t.DiaSemana, Inicio = t.HoraInicio, Fin = t.HoraFin })];
+    }
+
+    private void AgregarTramo() =>
+        _tramos.Add(new FilaTramo { Dia = DayOfWeek.Monday, Inicio = new TimeOnly(9, 0), Fin = new TimeOnly(18, 0) });
+
+    private async Task GuardarHorario()
+    {
+        var respuesta = await Api.GuardarHorarioAsync(
+            Cuenta, [.. _tramos.Select(t => new TramoHorario(t.Dia, t.Inicio, t.Fin))]);
+
+        if (!respuesta.Exito)
+        {
+            _mensajeHorario = respuesta.Motivo ?? "No se pudo guardar el horario.";
+            _errorHorario = true;
+            return;
+        }
+
+        await CargarHorario();
+
+        _mensajeHorario = "Horario guardado.";
+        _errorHorario = false;
+    }
+
+    private async Task CargarParametros()
+    {
+        _parametros = await Api.ParametrosAsync();
+
+        _valores.Clear();
+
+        foreach (var parametro in _parametros)
+            _valores[parametro.Clave] = parametro.Valor;
+    }
+
+    private async Task GuardarParametro(ParametroRegla parametro)
+    {
+        var respuesta = await Api.GuardarParametroAsync(parametro.Clave, _valores[parametro.Clave]);
+
+        if (!respuesta.Exito)
+        {
+            _mensajeParametros = respuesta.Motivo ?? "No se pudo guardar.";
+            _errorParametros = true;
+            return;
+        }
+
+        await CargarParametros();
+
+        _mensajeParametros = $"{parametro.Clave} actualizado.";
+        _errorParametros = false;
+    }
+
+    /// <summary>
+    /// Los topes de envio son lo que protege la linea de otro bloqueo (Seccion 9.6.4): se marcan para
+    /// que nadie los suba sin pensarlo.
+    /// </summary>
+    private static bool EsRiesgoso(string clave) => clave.StartsWith("envio.", StringComparison.Ordinal);
+
+    /// <summary>La semana empieza el lunes, como la piensa quien arma el horario.</summary>
+    private static int Orden(DayOfWeek dia) => ((int)dia + 6) % 7;
+
+    private static string NombreDia(DayOfWeek dia) => dia switch
+    {
+        DayOfWeek.Monday => "Lunes",
+        DayOfWeek.Tuesday => "Martes",
+        DayOfWeek.Wednesday => "Miércoles",
+        DayOfWeek.Thursday => "Jueves",
+        DayOfWeek.Friday => "Viernes",
+        DayOfWeek.Saturday => "Sábado",
+        _ => "Domingo"
+    };
+
+    private sealed class FilaTramo
+    {
+        public DayOfWeek Dia { get; set; }
+        public TimeOnly Inicio { get; set; }
+        public TimeOnly Fin { get; set; }
+    }
+}

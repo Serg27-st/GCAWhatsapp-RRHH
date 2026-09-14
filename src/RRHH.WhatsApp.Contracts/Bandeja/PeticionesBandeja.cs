@@ -32,8 +32,11 @@ public sealed record PeticionMarcar(
     string Tipo,
     string? Motivo);
 
-/// <summary>Regla 13: mueve la tarjeta entre columnas del tablero.</summary>
-public sealed record PeticionMoverEtapa(int PostulacionId, int EtapaId);
+/// <summary>
+/// Regla 13: mueve la tarjeta entre columnas del tablero. La postulacion va en la ruta,
+/// <c>POST /postulaciones/{id}/etapa</c>.
+/// </summary>
+public sealed record PeticionMoverEtapa(int EtapaId);
 
 public sealed record PeticionCrearVacante(int CuentaId, string Titulo, string? UrlJobForms);
 
@@ -79,15 +82,18 @@ public sealed record CuentaDetalle(
 public sealed record CampoOpcional(string NombreCampo, string Tipo, bool Activo);
 
 /// <summary>
-/// Regla 8: transferencia esperando la respuesta del analista destino. Trae de quién viene y sobre
-/// quién es, para que se pueda decidir sin abrir el chat.
+/// Regla 8: transferencia esperando la respuesta del analista destino. Trae de quién viene, de qué
+/// cuenta y sobre quién es, para que se pueda decidir sin abrir un chat que todavía no es suyo.
+/// <para>
+/// No lleva <c>Urgente</c>: una urgente se aplica sola y nunca queda esperando respuesta.
+/// </para>
 /// </summary>
 public sealed record TransferenciaPendiente(
     int TransferenciaId,
     int ConversacionId,
     string AnalistaOrigen,
+    string? Cuenta,
     string? NombrePostulante,
     string? TelefonoE164,
-    bool Urgente,
     string? Comentario,
     DateTime FechaUtc);

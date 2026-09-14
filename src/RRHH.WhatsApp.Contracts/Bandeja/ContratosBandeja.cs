@@ -30,11 +30,18 @@ public sealed record MensajeResumen(
     DateTime FechaEnvio,
     string EstadoEntrega);
 
-/// <summary>El chat completo de un hilo, con su cabecera y sus mensajes.</summary>
+/// <summary>
+/// El chat completo de un hilo, con su cabecera y sus mensajes.
+/// <para>
+/// <c>SoloLectura</c> es Sistemas mirando lo que atiende otro (Regla 4): la Api no le va a dejar
+/// responder, asi que la bandeja no le ofrece la caja.
+/// </para>
+/// </summary>
 public sealed record ConversacionDetalle(
     ConversacionResumen Resumen,
     IReadOnlyList<MensajeResumen> Mensajes,
-    IReadOnlyList<PostulacionResumen> Postulaciones);
+    IReadOnlyList<PostulacionResumen> Postulaciones,
+    bool SoloLectura);
 
 /// <summary>Tarjeta del tablero kanban (Regla 13).</summary>
 public sealed record PostulacionResumen(

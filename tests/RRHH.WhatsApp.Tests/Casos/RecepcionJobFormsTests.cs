@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using RRHH.WhatsApp.Application.Casos;
 using RRHH.WhatsApp.Domain.Entidades;
 using RRHH.WhatsApp.Domain.Enums;
 using RRHH.WhatsApp.Domain.Interfaces;
@@ -168,6 +169,36 @@ public class RecepcionJobFormsTests : IDisposable
 
         Assert.Single(_entorno.Db.Postulantes);
         Assert.Single(_entorno.Db.Postulaciones);
+    }
+
+
+    /// <summary>
+    /// V27: el Apps Script reintenta si se pierde la respuesta. Sin idempotencia quedaria una
+    /// segunda respuesta guardada y el evento se publicaria de nuevo, asi que el postulante
+    /// recibiria la confirmacion por duplicado.
+    /// </summary>
+    [Fact]
+    public async Task Un_envio_repetido_no_duplica_nada_y_se_anuncia_como_ya_recibido()
+    {
+        var token = await ConEnlaceEnviadoAsync();
+
+        var primero = await _entorno.RecepcionFormulario.ProcesarAsync(Envio(token));
+        var repetido = await _entorno.RecepcionFormulario.ProcesarAsync(Envio(token));
+
+        Assert.False(primero.YaRecibido);
+        Assert.True(repetido.YaRecibido);
+
+        Assert.Equal(primero.PostulanteId, repetido.PostulanteId);
+        Assert.Equal(primero.PostulacionId, repetido.PostulacionId);
+        Assert.Equal(primero.RespuestaId, repetido.RespuestaId);
+
+        Assert.Single(await _entorno.Db.JobFormsRespuestas.AsNoTracking().ToListAsync());
+        Assert.Single(await _entorno.Db.Postulaciones.AsNoTracking().ToListAsync());
+
+        var avisos = await _entorno.Db.EventosSistema.AsNoTracking()
+            .CountAsync(e => e.Tipo == TiposEvento.JobFormsCompletado);
+
+        Assert.Equal(1, avisos);
     }
 
     public void Dispose() => _entorno.Dispose();

@@ -147,6 +147,29 @@
 .aviso-vivo .senal { color: var(--tenue); }
 .aviso-vivo .senal.activa { color: #2e7d32; }
 
+/* Transferencias esperando respuesta (Regla 8). Color de aviso: es algo pendiente de uno mismo. */
+.transferencias-recibidas {
+    max-height: 40vh;
+    overflow-y: auto;
+    background: var(--aviso-fondo);
+    border-bottom: 1px solid var(--borde);
+}
+
+.transferencias-recibidas h3 {
+    margin: 0;
+    padding: 0.45rem 0.7rem 0.2rem;
+    color: var(--aviso);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.transferencias-recibidas .cantidad { float: right; }
+.transferencia { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.45rem 0.7rem 0.6rem; }
+.transferencia + .transferencia { border-top: 1px solid var(--borde); }
+.transferencia .comentario { margin: 0; font-size: 0.82rem; font-style: italic; }
+.transferencia .error { margin: 0; font-size: 0.8rem; }
+
 /* Login (Seccion 9.6.1). */
 .entrar { display: flex; align-items: center; justify-content: center; height: 100vh; }
 

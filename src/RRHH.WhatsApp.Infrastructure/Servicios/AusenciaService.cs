@@ -35,4 +35,30 @@ public sealed class AusenciaService(RrhhDbContext db) : IAusenciaService
     public Task<bool> EstaAusenteAsync(int analistaId, DateTime momento, CancellationToken ct = default) =>
         db.Ausencias.AnyAsync(
             a => a.AnalistaId == analistaId && a.FechaInicio <= momento && a.FechaFin >= momento, ct);
+
+    public async Task<IReadOnlyList<Ausencia>> ListarVigentesAsync(
+        int analistaId, DateTime desdeUtc, CancellationToken ct = default) =>
+        await db.Ausencias
+            .AsNoTracking()
+            .Where(a => a.AnalistaId == analistaId && a.FechaFin >= desdeUtc)
+            .OrderBy(a => a.FechaInicio)
+            .ToListAsync(ct);
+
+    /// <summary>
+    /// Se busca por analista y por id juntos: con el id solo, la ruta de un analista serviria para
+    /// borrar la ausencia de otro con solo cambiar el numero.
+    /// </summary>
+    public async Task<bool> EliminarAsync(int analistaId, int ausenciaId, CancellationToken ct = default)
+    {
+        var ausencia = await db.Ausencias
+            .FirstOrDefaultAsync(a => a.AusenciaId == ausenciaId && a.AnalistaId == analistaId, ct);
+
+        if (ausencia is null)
+            return false;
+
+        db.Ausencias.Remove(ausencia);
+        await db.SaveChangesAsync(ct);
+
+        return true;
+    }
 }

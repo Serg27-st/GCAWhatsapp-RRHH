@@ -1,0 +1,84 @@
+@inject ClienteApi Api
+
+@* Regla 8: lo que otro analista le derivo a quien esta en sesion y espera su respuesta. Va arriba
+   de la lista y no en una pestana: una transferencia sin contestar deja al postulante esperando
+   entre dos analistas, y una pestana es facil de no abrir.
+
+   Se decide con lo que trae la tarjeta, sin abrir el chat: el panel del chat trae la caja de
+   respuesta, y el destino podria escribirle al postulante en un hilo que todavia no acepto. *@
+@if (Pendientes.Count > 0)
+{
+    <section class="transferencias-recibidas">
+        <h3>Te transfirieron <span class="cantidad">@Pendientes.Count</span></h3>
+
+        @foreach (var transferencia in Pendientes)
+        {
+            <div class="transferencia" @key="transferencia.TransferenciaId">
+                <div class="fila-cabecera">
+                    <span class="nombre">@(transferencia.NombrePostulante ?? transferencia.TelefonoE164 ?? "Postulante sin identificar")</span>
+                    <span class="fecha">@HoraLima.Hace(transferencia.FechaUtc)</span>
+                </div>
+
+                <div class="fila-detalle">
+                    <span>de @transferencia.AnalistaOrigen</span>
+
+                    @if (transferencia.Cuenta is { } cuenta)
+                    {
+                        <span>@cuenta</span>
+                    }
+                </div>
+
+                @if (transferencia.Comentario is { } comentario)
+                {
+                    <p class="comentario">@comentario</p>
+                }
+
+                <div class="dialogo-acciones">
+                    <button class="btn btn-primary" disabled="@(_respondiendo is not null)"
+                            @onclick="() => Responder(transferencia, aceptada: true)">Aceptar</button>
+
+                    <button class="btn btn-outline-danger" disabled="@(_respondiendo is not null)"
+                            @onclick="() => Responder(transferencia, aceptada: false)">Rechazar</button>
+                </div>
+
+                @if (_errores.TryGetValue(transferencia.TransferenciaId, out var error))
+                {
+                    <p class="error">@error</p>
+                }
+            </div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<TransferenciaPendiente> Pendientes { get; set; } = [];
+
+    /// <summary>
+    /// Avisa que se respondio. Lleva la conversacion si se acepto, para que la bandeja la abra: es
+    /// lo que el analista va a hacer a continuacion.
+    /// </summary>
+    [Parameter] public EventCallback<int?> AlResponder { get; set; }
+
+    private readonly Dictionary<int, string> _errores = new();
+    private int? _respondiendo;
+
+    private async Task Responder(TransferenciaPendiente transferencia, bool aceptada)
+    {
+        _respondiendo = transferencia.TransferenciaId;
+        _errores.Remove(transferencia.TransferenciaId);
+
+        var respuesta = await Api.ResponderTransferenciaAsync(transferencia.TransferenciaId, aceptada);
+
+        _respondiendo = null;
+
+        if (!respuesta.Exito)
+        {
+            // Lo habitual es que ya no este pendiente: la respondio en otra pestana, o el hilo
+            // cambio mientras tanto. La tarjeta se queda con el motivo hasta el proximo refresco.
+            _errores[transferencia.TransferenciaId] = respuesta.Motivo ?? "No se pudo responder.";
+            return;
+        }
+
+        await AlResponder.InvokeAsync(aceptada ? transferencia.ConversacionId : null);
+    }
+}

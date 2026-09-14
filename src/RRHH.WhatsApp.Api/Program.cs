@@ -78,9 +78,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization(opciones =>
+{
     opciones.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
-        .Build());
+        .Build();
+
+    // V23: quien administra que, por rol. Se suman a la de respaldo, no la reemplazan.
+    Politicas.Registrar(opciones);
+});
 // Seccion 9.6.3: el canal en vivo hacia la bandeja, y el bucle que le da de comer desde la outbox.
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<IAvisoBandeja, AvisoBandeja>();
@@ -93,6 +98,9 @@ builder.Services.AddHealthChecks()
     .AddCheck<ChequeoWorker>("worker", tags: ["listo"]);
 
 builder.Services.Configure<OpcionesJobForms>(builder.Configuration.GetSection(OpcionesJobForms.Seccion));
+
+// V25: el correo del primer analista de Sistemas, para poner en marcha una base nueva.
+builder.Services.Configure<OpcionesArranque>(builder.Configuration.GetSection(OpcionesArranque.Seccion));
 
 var limitePorMinuto = builder.Configuration
     .GetSection(OpcionesJobForms.Seccion)

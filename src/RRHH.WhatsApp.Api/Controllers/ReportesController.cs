@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using RRHH.WhatsApp.Api.Seguridad;
 using RRHH.WhatsApp.Reporting;
 
 namespace RRHH.WhatsApp.Api.Controllers;
@@ -6,9 +8,14 @@ namespace RRHH.WhatsApp.Api.Controllers;
 /// <summary>
 /// Regla 18 — panel de gerencia. Lee del modelo de solo lectura y nunca de los servicios de
 /// dominio: un reporte pesado no debe competir con las conversaciones que se estan atendiendo.
+/// <para>
+/// Es de Jefatura y Sistemas (V23): la actividad por analista es la evaluacion de cada uno, y no
+/// corresponde que la vea un compañero.
+/// </para>
 /// </summary>
 [ApiController]
 [Route("reportes")]
+[Authorize(Policy = Politicas.Jefatura)]
 public sealed class ReportesController(IReportingReadModel reporting) : ControllerBase
 {
     /// <summary>Dias que cubre el panel cuando no se indica periodo. Un mes es el ciclo del negocio.</summary>

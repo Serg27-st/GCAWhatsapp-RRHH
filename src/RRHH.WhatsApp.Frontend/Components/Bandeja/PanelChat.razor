@@ -54,7 +54,7 @@
                     <p>@mensaje.Contenido</p>
 
                     <span class="meta">
-                        @ARegionLima(mensaje.FechaEnvio).ToString("dd/MM HH:mm")
+                        @HoraLima.Desde(mensaje.FechaEnvio).ToString("dd/MM HH:mm")
                         @if (mensaje.Plantilla is { } plantilla)
                         {
                             <span class="etiqueta-plantilla">@plantilla</span>
@@ -69,7 +69,18 @@
             }
         </div>
 
-        <CajaRespuesta Detalle="Detalle" AlEnviar="Recargar" />
+        @* Regla 4: Sistemas ve todo, pero responder en un hilo ajeno le hablaria al postulante en
+           nombre de otro. La Api lo rechaza igual; aca solo se evita ofrecer lo que no va a andar. *@
+        @if (Detalle.SoloLectura)
+        {
+            <div class="caja-respuesta">
+                <p class="aviso">Solo lectura: esta conversación la atiende otro analista.</p>
+            </div>
+        }
+        else
+        {
+            <CajaRespuesta Detalle="Detalle" AlEnviar="Recargar" />
+        }
     }
 </div>
 
@@ -78,6 +89,4 @@
     [Parameter] public EventCallback AlCambiar { get; set; }
 
     private Task Recargar() => AlCambiar.InvokeAsync();
-
-    private static DateTime ARegionLima(DateTime utc) => utc.AddHours(-5);
 }

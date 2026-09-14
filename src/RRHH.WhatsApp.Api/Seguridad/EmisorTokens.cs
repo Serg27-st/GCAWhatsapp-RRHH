@@ -20,6 +20,9 @@ public static class ClaimsAnalista
 
     /// <summary>Regla 4: el rol Sistemas ve todas las conversaciones, para soporte y auditoría.</summary>
     public const string RolSistemas = "Sistemas";
+
+    /// <summary>V23: métricas, ausencias de otros y cobertura de cuentas, sin ver conversaciones ajenas.</summary>
+    public const string RolJefatura = "Jefatura";
 }
 
 public sealed class EmisorTokens(IOptions<OpcionesJwt> opciones)

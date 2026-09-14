@@ -23,7 +23,8 @@
             <select class="form-select" @bind="_destinoId">
                 <option value="0">Elegir analista…</option>
 
-                @foreach (var analista in _analistas.Where(a => a.AnalistaId != Sesion.AnalistaId))
+                @* Jefatura y Sistemas no atienden conversaciones (V23): la Api rechazaria la transferencia. *@
+                @foreach (var analista in _analistas.Where(a => a.AnalistaId != Sesion.AnalistaId && a.Rol == "Analista"))
                 {
                     <option value="@analista.AnalistaId">@analista.Nombre</option>
                 }

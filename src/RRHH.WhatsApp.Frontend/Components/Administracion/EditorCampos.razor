@@ -1,0 +1,98 @@
+@inject ClienteApi Api
+
+@* Seccion 9.2: preguntas propias de la vacante, ademas de DNI y CV. Se guarda el conjunto entero
+   —es reemplazo, no edicion campo por campo—, porque el analista las piensa juntas al abrirla. *@
+<div class="subpanel">
+    @if (_filas is null)
+    {
+        <p class="vacio">Cargando campos…</p>
+    }
+    else
+    {
+        @if (_filas.Count == 0)
+        {
+            <p class="detalle">Sin campos opcionales: el formulario pide solo DNI y CV.</p>
+        }
+
+        @foreach (var fila in _filas)
+        {
+            <div class="fila-form">
+                <input class="form-control" placeholder="Nombre del campo" @bind="fila.Nombre" />
+
+                <select class="form-select" @bind="fila.Tipo">
+                    @foreach (var tipo in Catalogos.TiposCampoOpcional)
+                    {
+                        <option value="@tipo">@tipo</option>
+                    }
+                </select>
+
+                <label class="casilla"><input type="checkbox" @bind="fila.Activo" /> se pregunta</label>
+
+                <button class="btn btn-link" @onclick="() => Quitar(fila)">quitar</button>
+            </div>
+        }
+
+        <p class="detalle">
+            Para dejar de preguntar algo sin perder de vista quién ya lo contestó, desmarcalo en vez de quitarlo.
+        </p>
+
+        <div class="acciones">
+            <button class="btn" @onclick="Agregar">Agregar campo</button>
+            <button class="btn btn-primary" @onclick="Guardar" disabled="@_guardando">Guardar campos</button>
+        </div>
+
+        @if (_mensaje is { } mensaje)
+        {
+            <p class="@(_esError ? "error" : "ok")">@mensaje</p>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int HcId { get; set; }
+
+    private List<FilaCampo>? _filas;
+    private int? _cargadoPara;
+    private bool _guardando;
+    private string? _mensaje;
+    private bool _esError;
+
+    /// <summary>Solo cuando cambia la vacante: recargar en cada render de la pagina borraria lo que se esta editando.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_cargadoPara == HcId)
+            return;
+
+        _cargadoPara = HcId;
+
+        var campos = await Api.CamposAsync(HcId);
+
+        _filas = [.. campos.Select(c => new FilaCampo { Nombre = c.NombreCampo, Tipo = c.Tipo, Activo = c.Activo })];
+    }
+
+    private void Agregar() => _filas?.Add(new FilaCampo { Tipo = Catalogos.TiposCampoOpcional[0], Activo = true });
+
+    private void Quitar(FilaCampo fila) => _filas?.Remove(fila);
+
+    private async Task Guardar()
+    {
+        if (_filas is null)
+            return;
+
+        _guardando = true;
+
+        var respuesta = await Api.GuardarCamposAsync(
+            HcId, [.. _filas.Select(f => new CampoOpcional(f.Nombre.Trim(), f.Tipo, f.Activo))]);
+
+        _guardando = false;
+        _esError = !respuesta.Exito;
+        _mensaje = respuesta.Exito ? "Campos guardados." : respuesta.Motivo ?? "No se pudieron guardar.";
+    }
+
+    private sealed class FilaCampo
+    {
+        public string Nombre { get; set; } = string.Empty;
+        public string Tipo { get; set; } = string.Empty;
+        public bool Activo { get; set; }
+    }
+}

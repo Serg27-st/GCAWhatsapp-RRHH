@@ -1,0 +1,92 @@
+@page "/mi-cuenta"
+@rendermode InteractiveServer
+@inject ClienteApi Api
+@inject SesionAnalista Sesion
+
+<PageTitle>Mi cuenta</PageTitle>
+
+<div class="admin">
+    <h1>Mi cuenta</h1>
+
+    @if (!Sesion.Activa || Sesion.AnalistaId is not { } yo)
+    {
+        <p class="vacio">Tu sesión expiró. Volvé a entrar.</p>
+    }
+    else
+    {
+        <section>
+            <h2>Contraseña</h2>
+
+            @* Seccion 9.6.1: la Api exige la actual, para que un token robado no alcance para fijar otra. *@
+            <form class="fila-form" @onsubmit="CambiarContrasena" @onsubmit:preventDefault="true">
+                <label>
+                    Actual
+                    <input type="password" class="form-control" @bind="_actual" @bind:event="oninput"
+                           autocomplete="current-password" />
+                </label>
+                <label>
+                    Nueva
+                    <input type="password" class="form-control" @bind="_nueva" @bind:event="oninput"
+                           autocomplete="new-password" />
+                </label>
+                <label>
+                    Repetila
+                    <input type="password" class="form-control" @bind="_repetida" @bind:event="oninput"
+                           autocomplete="new-password" />
+                </label>
+                <button class="btn btn-primary" type="submit" disabled="@(!PuedeCambiar)">Cambiar contraseña</button>
+            </form>
+
+            @if (_nueva.Length > 0 && _repetida.Length > 0 && _nueva != _repetida)
+            {
+                <p class="error">La nueva y la repetida no coinciden.</p>
+            }
+
+            @if (_mensaje is { } mensaje)
+            {
+                <p class="@(_esError ? "error" : "ok")">@mensaje</p>
+            }
+        </section>
+
+        <section>
+            <h2>Mis ausencias</h2>
+            <p class="detalle">
+                Mientras dure una ausencia, las conversaciones nuevas de tus cuentas van directo a tu respaldo (Regla 14).
+            </p>
+
+            <EditorAusencias AnalistaId="yo" />
+        </section>
+    }
+</div>
+
+@code {
+    private string _actual = string.Empty;
+    private string _nueva = string.Empty;
+    private string _repetida = string.Empty;
+    private bool _cambiando;
+    private string? _mensaje;
+    private bool _esError;
+
+    private bool PuedeCambiar =>
+        !_cambiando && _actual.Length > 0 && _nueva.Length > 0 && _nueva == _repetida;
+
+    private async Task CambiarContrasena()
+    {
+        _cambiando = true;
+
+        var respuesta = await Api.CambiarContrasenaAsync(_actual, _nueva);
+
+        _cambiando = false;
+
+        if (!respuesta.Exito)
+        {
+            _mensaje = respuesta.Motivo ?? "No se pudo cambiar la contraseña.";
+            _esError = true;
+            return;
+        }
+
+        _actual = _nueva = _repetida = string.Empty;
+        _mensaje = "Contraseña cambiada. Esta sesión sigue abierta hasta que venza.";
+        _esError = false;
+    }
+}

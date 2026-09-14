@@ -32,7 +32,7 @@
                             <span class="dni">DNI @dni</span>
                         }
 
-                        <span class="fecha">@Momento(conversacion.FechaUltimaActividad)</span>
+                        <span class="fecha">@HoraLima.Hace(conversacion.FechaUltimaActividad)</span>
                     </div>
 
                     @* Regla 15: fuera de la ventana solo se puede responder con plantilla. *@
@@ -64,21 +64,4 @@
             .GroupBy(c => c.Cuenta ?? "Sin clasificar")
             .OrderBy(g => g.Key == "Sin clasificar" ? 1 : 0)
             .ThenBy(g => g.Key);
-
-    private static string Momento(DateTime utc)
-    {
-        var transcurrido = DateTime.UtcNow - utc;
-
-        return transcurrido switch
-        {
-            { TotalMinutes: < 1 } => "recién",
-            { TotalHours: < 1 } => $"hace {(int)transcurrido.TotalMinutes} min",
-            { TotalDays: < 1 } => $"hace {(int)transcurrido.TotalHours} h",
-            { TotalDays: < 30 } => $"hace {(int)transcurrido.TotalDays} d",
-            _ => ARegionLima(utc).ToString("dd/MM/yyyy")
-        };
-    }
-
-    /// <summary>Las fechas se guardan en UTC y se muestran en hora de Lima (UTC-5, sin verano).</summary>
-    private static DateTime ARegionLima(DateTime utc) => utc.AddHours(-5);
 }

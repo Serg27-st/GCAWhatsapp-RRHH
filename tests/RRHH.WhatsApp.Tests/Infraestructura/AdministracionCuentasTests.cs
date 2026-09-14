@@ -158,5 +158,42 @@ public class AdministracionCuentasTests : IDisposable
         Assert.Equal(1, fila.VacantesAbiertas);
     }
 
+    /// <summary>
+    /// El caso que la pantalla de equipo vuelve cotidiano: el respaldo pasa a titular. Antes quedaban
+    /// dos titulares, y en SQL Server el indice unico rechazaba el cambio con un error sin explicacion.
+    /// El orden contra el indice real se prueba en <see cref="AsignacionCuentasSqlServerTests"/>.
+    /// </summary>
+    [Fact]
+    public async Task Pasar_el_respaldo_a_titular_desplaza_al_titular_anterior()
+    {
+        var cuenta = await _cuentas.CrearAsync("Alicorp");
+        var titular = await AnalistaAsync("Ana Torres", "ana@gca.pe");
+        var respaldo = await AnalistaAsync("Luis Vega", "luis@gca.pe");
+
+        await _cuentas.AsignarAnalistaAsync(cuenta.CuentaId, titular.AnalistaId, esBackup: false);
+        await _cuentas.AsignarAnalistaAsync(cuenta.CuentaId, respaldo.AnalistaId, esBackup: true);
+
+        await _cuentas.AsignarAnalistaAsync(cuenta.CuentaId, respaldo.AnalistaId, esBackup: false);
+
+        var fila = Assert.Single(await _cuentas.ListarConDotacionAsync());
+
+        Assert.Equal(respaldo.AnalistaId, fila.Titular!.AnalistaId);
+        Assert.Null(fila.Respaldo);
+        Assert.Single(_db.AnalistaCuentas.Where(ac => ac.CuentaId == cuenta.CuentaId));
+    }
+
+    /// <summary>V23: como titular o respaldo recibirian conversaciones que no van a responder.</summary>
+    [Theory]
+    [InlineData(RolAnalista.Jefatura)]
+    [InlineData(RolAnalista.Sistemas)]
+    public async Task Quien_no_atiende_conversaciones_no_cubre_una_cuenta(RolAnalista rol)
+    {
+        var cuenta = await _cuentas.CrearAsync("Alicorp");
+        var quien = await _analistas.CrearAsync("Del area", "area@gca.pe", rol);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _cuentas.AsignarAnalistaAsync(cuenta.CuentaId, quien.AnalistaId, esBackup: false));
+    }
+
     public void Dispose() => _db.Dispose();
 }

@@ -1,0 +1,366 @@
+@page "/equipo"
+@rendermode InteractiveServer
+@inject ClienteApi Api
+@inject SesionAnalista Sesion
+
+<PageTitle>Equipo</PageTitle>
+
+@* V23: la cobertura de cada cuenta y las ausencias de cualquiera son de Jefatura y Sistemas; dar de
+   alta cuentas y analistas, o restablecer contraseñas, solo de Sistemas. La Api lo exige igual: aca
+   solo se evita ofrecer lo que va a responder que no. *@
+<div class="admin">
+    <h1>Equipo</h1>
+
+    @if (!Sesion.PuedeAdministrarEquipo)
+    {
+        <p class="vacio">Esta pantalla es de Jefatura y Sistemas.</p>
+    }
+    else if (_cargando)
+    {
+        <p class="vacio">Cargando…</p>
+    }
+    else
+    {
+        @if (_mensaje is { } mensaje)
+        {
+            <p class="@(_esError ? "error" : "ok")">@mensaje</p>
+        }
+
+        <section>
+            <h2>Cobertura por cuenta</h2>
+            <p class="detalle">
+                El titular recibe las conversaciones de la cuenta (Regla 1). El respaldo, las que el titular no
+                responde a tiempo o las que llegan mientras está ausente (Reglas 2 y 14).
+            </p>
+
+            <table class="tabla">
+                <thead>
+                    <tr><th>Cuenta</th><th>Titular</th><th>Respaldo</th><th>Vacantes</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var cuenta in _cuentas)
+                    {
+                        var borrador = _cobertura[cuenta.CuentaId];
+
+                        <tr @key="cuenta.CuentaId">
+                            <td>
+                                @cuenta.Nombre
+                                @if (!cuenta.Activo)
+                                {
+                                    <span class="chip">inactiva</span>
+                                }
+                            </td>
+                            <td>
+                                <select class="form-select" @bind="borrador.TitularId">
+                                    <option value="0">— sin titular —</option>
+                                    @foreach (var analista in Candidatos(cuenta.Titular))
+                                    {
+                                        <option value="@analista.AnalistaId">@analista.Nombre</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>
+                                <select class="form-select" @bind="borrador.RespaldoId">
+                                    <option value="0">— sin respaldo —</option>
+                                    @foreach (var analista in Candidatos(cuenta.Respaldo))
+                                    {
+                                        <option value="@analista.AnalistaId">@analista.Nombre</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>@cuenta.VacantesAbiertas</td>
+                            <td>
+                                <button class="btn" disabled="@(!borrador.CambiaRespectoDe(cuenta))"
+                                        @onclick="() => GuardarCobertura(cuenta)">Guardar</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (Sesion.EsSistemas)
+            {
+                <form class="fila-form" @onsubmit="CrearCuenta" @onsubmit:preventDefault="true">
+                    <label>
+                        Nueva cuenta
+                        <input class="form-control" @bind="_nuevaCuenta" @bind:event="oninput" placeholder="Nombre del cliente" />
+                    </label>
+                    <button class="btn btn-primary" type="submit" disabled="@(string.IsNullOrWhiteSpace(_nuevaCuenta))">
+                        Crear cuenta
+                    </button>
+                </form>
+            }
+        </section>
+
+        <section>
+            <h2>Analistas</h2>
+
+            <table class="tabla">
+                <thead>
+                    <tr><th>Nombre</th><th>Correo</th><th>Rol</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var analista in _analistas)
+                    {
+                        <tr @key="analista.AnalistaId">
+                            <td>@analista.Nombre</td>
+                            <td>@analista.Email</td>
+                            <td>@analista.Rol</td>
+                            <td>
+                                <div class="acciones">
+                                    <button class="btn" @onclick="() => Alternar(ref _ausenciasDe, analista.AnalistaId)">Ausencias</button>
+
+                                    @if (Sesion.EsSistemas)
+                                    {
+                                        <button class="btn" @onclick="() => Alternar(ref _contrasenaDe, analista.AnalistaId)">Contraseña</button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+
+                        @if (_ausenciasDe == analista.AnalistaId)
+                        {
+                            <tr>
+                                <td colspan="4"><EditorAusencias AnalistaId="analista.AnalistaId" /></td>
+                            </tr>
+                        }
+
+                        @if (_contrasenaDe == analista.AnalistaId)
+                        {
+                            <tr>
+                                <td colspan="4">
+                                    <form class="fila-form subpanel" @onsubmit="() => Restablecer(analista)" @onsubmit:preventDefault="true">
+                                        <label>
+                                            Contraseña nueva para @analista.Nombre
+                                            <input type="password" class="form-control" @bind="_contrasenaNueva"
+                                                   @bind:event="oninput" autocomplete="new-password" />
+                                        </label>
+                                        <button class="btn btn-primary" type="submit"
+                                                disabled="@(string.IsNullOrWhiteSpace(_contrasenaNueva))">Restablecer</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+
+            @if (Sesion.EsSistemas)
+            {
+                <form class="fila-form" @onsubmit="CrearAnalista" @onsubmit:preventDefault="true">
+                    <label>Nombre <input class="form-control" @bind="_nuevoAnalista.Nombre" @bind:event="oninput" /></label>
+                    <label>Correo <input type="email" class="form-control" @bind="_nuevoAnalista.Email" @bind:event="oninput" /></label>
+                    <label>
+                        Rol
+                        <select class="form-select" @bind="_nuevoAnalista.Rol">
+                            @foreach (var rol in Catalogos.Roles)
+                            {
+                                <option value="@rol">@rol</option>
+                            }
+                        </select>
+                    </label>
+                    <button class="btn btn-primary" type="submit" disabled="@(!_nuevoAnalista.Completo)">Dar de alta</button>
+                </form>
+
+                <p class="detalle">
+                    Un analista nuevo no puede entrar hasta tener contraseña: restablecésela acá y pasásela por un
+                    canal seguro, para que la cambie en Mi cuenta.
+                </p>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<CuentaDetalle> _cuentas = [];
+    private IReadOnlyList<AnalistaResumen> _analistas = [];
+    private readonly Dictionary<int, BorradorCobertura> _cobertura = new();
+    private readonly BorradorAnalista _nuevoAnalista = new();
+    private bool _cargando = true;
+    private int? _ausenciasDe;
+    private int? _contrasenaDe;
+    private string _contrasenaNueva = string.Empty;
+    private string _nuevaCuenta = string.Empty;
+    private string? _mensaje;
+    private bool _esError;
+
+    /// <summary>
+    /// Solo quien atiende conversaciones puede cubrir una cuenta: Jefatura y Sistemas no las atienden
+    /// (V23), y la Api rechazaria la asignacion.
+    /// </summary>
+    private IEnumerable<AnalistaResumen> Atienden => _analistas.Where(a => a.Rol == "Analista");
+
+    /// <summary>
+    /// Si hoy ocupa el lugar alguien que ya no calificaria, se lo sigue mostrando: si no, el
+    /// selector apareceria vacio y guardaria un cambio que nadie pidio.
+    /// </summary>
+    private IEnumerable<AnalistaResumen> Candidatos(AnalistaResumen? actual) =>
+        actual is null || Atienden.Any(a => a.AnalistaId == actual.AnalistaId) ? Atienden : Atienden.Append(actual);
+
+    protected override Task OnInitializedAsync() => CargarAsync();
+
+    private async Task CargarAsync()
+    {
+        if (!Sesion.PuedeAdministrarEquipo)
+            return;
+
+        _cargando = true;
+
+        _cuentas = await Api.CuentasAsync();
+        _analistas = await Api.AnalistasAsync();
+
+        _cobertura.Clear();
+
+        foreach (var cuenta in _cuentas)
+        {
+            _cobertura[cuenta.CuentaId] = new BorradorCobertura
+            {
+                TitularId = cuenta.Titular?.AnalistaId ?? 0,
+                RespaldoId = cuenta.Respaldo?.AnalistaId ?? 0
+            };
+        }
+
+        _cargando = false;
+    }
+
+    private async Task GuardarCobertura(CuentaDetalle cuenta)
+    {
+        var deseado = _cobertura[cuenta.CuentaId];
+        var titularActual = cuenta.Titular?.AnalistaId ?? 0;
+        var respaldoActual = cuenta.Respaldo?.AnalistaId ?? 0;
+
+        if (deseado.TitularId != 0 && deseado.TitularId == deseado.RespaldoId)
+        {
+            Informar("El titular y el respaldo tienen que ser personas distintas: si fueran la misma, " +
+                     "escalar le devolvería la conversación a quien no respondió (Regla 2).", error: true);
+            return;
+        }
+
+        // El titular va primero. Si el respaldo pasa a titular, la Api lo mueve y saca al anterior, y
+        // recien despues se ocupa el lugar de respaldo; al reves, los dos pasos se pisarian.
+        if (deseado.TitularId != titularActual)
+        {
+            var paso = deseado.TitularId != 0
+                ? await Api.AsignarAnalistaAsync(cuenta.CuentaId, deseado.TitularId, esBackup: false)
+                : titularActual != deseado.RespaldoId
+                    ? await Api.QuitarAnalistaAsync(cuenta.CuentaId, titularActual)
+                    : RespuestaApi.Ok; // el titular pasa a respaldo: lo mueve el paso siguiente
+
+            if (!await SeguirAsync(paso))
+                return;
+        }
+
+        if (deseado.RespaldoId != respaldoActual)
+        {
+            var paso = deseado.RespaldoId != 0
+                ? await Api.AsignarAnalistaAsync(cuenta.CuentaId, deseado.RespaldoId, esBackup: true)
+                : respaldoActual != deseado.TitularId
+                    ? await Api.QuitarAnalistaAsync(cuenta.CuentaId, respaldoActual)
+                    : RespuestaApi.Ok; // el respaldo ya paso a titular en el paso anterior
+
+            if (!await SeguirAsync(paso))
+                return;
+        }
+
+        Informar($"Cobertura de {cuenta.Nombre} actualizada.");
+
+        await CargarAsync();
+    }
+
+    /// <summary>Si un paso falla se recarga igual: el anterior pudo haber salido, y la tabla tiene que mostrar lo que quedo.</summary>
+    private async Task<bool> SeguirAsync(RespuestaApi paso)
+    {
+        if (paso.Exito)
+            return true;
+
+        Informar(paso.Motivo, error: true);
+
+        await CargarAsync();
+
+        return false;
+    }
+
+    private async Task Restablecer(AnalistaResumen analista)
+    {
+        var respuesta = await Api.RestablecerContrasenaAsync(analista.AnalistaId, _contrasenaNueva);
+
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        _contrasenaDe = null;
+        _contrasenaNueva = string.Empty;
+
+        Informar($"Contraseña de {analista.Nombre} restablecida. Pasásela por un canal seguro y pedile que la cambie en Mi cuenta.");
+    }
+
+    private async Task CrearCuenta()
+    {
+        var respuesta = await Api.CrearCuentaAsync(_nuevaCuenta.Trim());
+
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        // Regla 1: sin titular la cuenta no enruta a nadie, y sin vacantes el bot no la ofrece.
+        Informar($"Cuenta {_nuevaCuenta.Trim()} creada. Falta asignarle titular y respaldo, y abrirle vacantes.");
+        _nuevaCuenta = string.Empty;
+
+        await CargarAsync();
+    }
+
+    private async Task CrearAnalista()
+    {
+        var respuesta = await Api.CrearAnalistaAsync(new PeticionCrearAnalista(
+            _nuevoAnalista.Nombre.Trim(), _nuevoAnalista.Email.Trim(), _nuevoAnalista.Rol));
+
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        Informar($"{_nuevoAnalista.Nombre.Trim()} dado de alta. Todavía no puede entrar: restablecele la contraseña.");
+        _nuevoAnalista.Limpiar();
+
+        await CargarAsync();
+    }
+
+    private static void Alternar(ref int? abierto, int analistaId) =>
+        abierto = abierto == analistaId ? null : analistaId;
+
+    private void Informar(string? mensaje, bool error = false)
+    {
+        _mensaje = mensaje ?? "No se pudo hacer.";
+        _esError = error;
+    }
+
+    private sealed class BorradorCobertura
+    {
+        public int TitularId { get; set; }
+        public int RespaldoId { get; set; }
+
+        public bool CambiaRespectoDe(CuentaDetalle cuenta) =>
+            TitularId != (cuenta.Titular?.AnalistaId ?? 0) || RespaldoId != (cuenta.Respaldo?.AnalistaId ?? 0);
+    }
+
+    private sealed class BorradorAnalista
+    {
+        public string Nombre { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Rol { get; set; } = Catalogos.Roles[0];
+
+        public bool Completo => !string.IsNullOrWhiteSpace(Nombre) && !string.IsNullOrWhiteSpace(Email);
+
+        public void Limpiar()
+        {
+            Nombre = string.Empty;
+            Email = string.Empty;
+            Rol = Catalogos.Roles[0];
+        }
+    }
+}

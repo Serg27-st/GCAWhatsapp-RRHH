@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using RRHH.WhatsApp.Api.Seguridad;
 using RRHH.WhatsApp.Contracts.Bandeja;
 using RRHH.WhatsApp.Domain.Interfaces;
 
@@ -7,6 +9,10 @@ namespace RRHH.WhatsApp.Api.Controllers;
 /// <summary>
 /// Alta de clientes y su dotacion. Sin estas rutas el sistema arranca pero no puede enrutar nada:
 /// el menu del bot no tiene empresas que ofrecer y la Regla 1 no tiene a quien asignarle el hilo.
+/// <para>
+/// Ver la dotacion es para todos: la bandeja la necesita para saber a quien transferir (Regla 8).
+/// Dar de alta una cuenta es de Sistemas; decidir quien la cubre, de Jefatura (V23).
+/// </para>
 /// </summary>
 [ApiController]
 [Route("cuentas")]
@@ -30,6 +36,7 @@ public sealed class CuentasController(ICuentaService cuentas, ILogger<CuentasCon
     }
 
     [HttpPost]
+    [Authorize(Policy = Politicas.Estructura)]
     public async Task<IActionResult> Crear([FromBody] PeticionCrearCuenta peticion, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(peticion.Nombre))
@@ -52,12 +59,17 @@ public sealed class CuentasController(ICuentaService cuentas, ILogger<CuentasCon
     /// cuenta, asi que asignar reemplaza a quien lo ocupaba.
     /// </summary>
     [HttpPost("{id:int}/analistas")]
+    [Authorize(Policy = Politicas.Jefatura)]
     public async Task<IActionResult> Asignar(
         int id, [FromBody] PeticionAsignarAnalista peticion, CancellationToken ct)
     {
         try
         {
             await cuentas.AsignarAnalistaAsync(id, peticion.AnalistaId, peticion.EsBackup, ct);
+
+            log.LogInformation(
+                "El analista {Autor} asigno a {AnalistaId} como {Rol} de la cuenta {CuentaId}.",
+                User.AnalistaId(), peticion.AnalistaId, peticion.EsBackup ? "respaldo" : "titular", id);
 
             return NoContent();
         }
@@ -70,6 +82,7 @@ public sealed class CuentasController(ICuentaService cuentas, ILogger<CuentasCon
     }
 
     [HttpDelete("{id:int}/analistas/{analistaId:int}")]
+    [Authorize(Policy = Politicas.Jefatura)]
     public async Task<IActionResult> Quitar(int id, int analistaId, CancellationToken ct)
     {
         await cuentas.QuitarAnalistaAsync(id, analistaId, ct);

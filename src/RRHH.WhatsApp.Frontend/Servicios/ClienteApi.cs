@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using RRHH.WhatsApp.Contracts.Administracion;
 using RRHH.WhatsApp.Contracts.Bandeja;
 using RRHH.WhatsApp.Contracts.Metricas;
 using RRHH.WhatsApp.Contracts.Seguridad;
@@ -109,17 +110,100 @@ public sealed class ClienteApi(HttpClient http, SesionAnalista sesion, ILogger<C
         int conversacionId, PeticionTransferir peticion, CancellationToken ct = default) =>
         EnviarAsync($"conversaciones/{conversacionId}/transferir", peticion, ct);
 
-    public Task<RespuestaApi> MoverEtapaAsync(
-        int conversacionId, PeticionMoverEtapa peticion, CancellationToken ct = default) =>
-        EnviarAsync($"conversaciones/{conversacionId}/etapa", peticion, ct);
+    /// <summary>Regla 8: lo que le transfirieron a quien está en sesión y espera su respuesta.</summary>
+    public Task<IReadOnlyList<TransferenciaPendiente>> TransferenciasPendientesAsync(CancellationToken ct = default) =>
+        LeerListaAsync<TransferenciaPendiente>("transferencias/pendientes", ct);
 
-    private async Task<RespuestaApi> EnviarAsync<T>(string ruta, T cuerpo, CancellationToken ct)
+    public Task<RespuestaApi> ResponderTransferenciaAsync(
+        int transferenciaId, bool aceptada, CancellationToken ct = default) =>
+        EnviarAsync($"transferencias/{transferenciaId}/responder", new PeticionResponderTransferencia(aceptada), ct);
+
+    public Task<RespuestaApi> MoverEtapaAsync(
+        int postulacionId, PeticionMoverEtapa peticion, CancellationToken ct = default) =>
+        EnviarAsync($"postulaciones/{postulacionId}/etapa", peticion, ct);
+
+    // Administracion (V23). Quien puede que lo decide la Api; estos metodos solo traen su respuesta,
+    // incluido el motivo cuando dice que no.
+
+    public Task<RespuestaApi> CambiarContrasenaAsync(string actual, string nueva, CancellationToken ct = default) =>
+        EnviarAsync(HttpMethod.Put, "sesion/contrasena", new PeticionCambiarContrasena(actual, nueva), ct);
+
+    public Task<RespuestaApi> RestablecerContrasenaAsync(int analistaId, string nueva, CancellationToken ct = default) =>
+        EnviarAsync(HttpMethod.Put, $"sesion/analistas/{analistaId}/contrasena", new PeticionRestablecerContrasena(nueva), ct);
+
+    public Task<IReadOnlyList<CuentaDetalle>> CuentasAsync(CancellationToken ct = default) =>
+        LeerListaAsync<CuentaDetalle>("cuentas", ct);
+
+    public Task<RespuestaApi> CrearCuentaAsync(string nombre, CancellationToken ct = default) =>
+        EnviarAsync("cuentas", new PeticionCrearCuenta(nombre), ct);
+
+    public Task<RespuestaApi> AsignarAnalistaAsync(int cuentaId, int analistaId, bool esBackup, CancellationToken ct = default) =>
+        EnviarAsync($"cuentas/{cuentaId}/analistas", new PeticionAsignarAnalista(analistaId, esBackup), ct);
+
+    public Task<RespuestaApi> QuitarAnalistaAsync(int cuentaId, int analistaId, CancellationToken ct = default) =>
+        EnviarSinCuerpoAsync(HttpMethod.Delete, $"cuentas/{cuentaId}/analistas/{analistaId}", ct);
+
+    public Task<RespuestaApi> CrearAnalistaAsync(PeticionCrearAnalista peticion, CancellationToken ct = default) =>
+        EnviarAsync("analistas", peticion, ct);
+
+    public Task<IReadOnlyList<AusenciaResumen>> AusenciasAsync(int analistaId, CancellationToken ct = default) =>
+        LeerListaAsync<AusenciaResumen>($"analistas/{analistaId}/ausencias", ct);
+
+    public Task<RespuestaApi> RegistrarAusenciaAsync(int analistaId, PeticionAusencia peticion, CancellationToken ct = default) =>
+        EnviarAsync($"analistas/{analistaId}/ausencias", peticion, ct);
+
+    public Task<RespuestaApi> CancelarAusenciaAsync(int analistaId, int ausenciaId, CancellationToken ct = default) =>
+        EnviarSinCuerpoAsync(HttpMethod.Delete, $"analistas/{analistaId}/ausencias/{ausenciaId}", ct);
+
+    public Task<IReadOnlyList<VacanteResumen>> VacantesAsync(int cuentaId, CancellationToken ct = default) =>
+        LeerListaAsync<VacanteResumen>($"hc?cuentaId={cuentaId}", ct);
+
+    public Task<RespuestaApi> CrearVacanteAsync(PeticionCrearVacante peticion, CancellationToken ct = default) =>
+        EnviarAsync("hc", peticion, ct);
+
+    public Task<RespuestaApi> CerrarVacanteAsync(int hcId, CancellationToken ct = default) =>
+        EnviarSinCuerpoAsync(HttpMethod.Patch, $"hc/{hcId}/cerrar", ct);
+
+    public Task<IReadOnlyList<CampoOpcional>> CamposAsync(int hcId, CancellationToken ct = default) =>
+        LeerListaAsync<CampoOpcional>($"hc/{hcId}/campos", ct);
+
+    public Task<RespuestaApi> GuardarCamposAsync(int hcId, IReadOnlyList<CampoOpcional> campos, CancellationToken ct = default) =>
+        EnviarAsync(HttpMethod.Put, $"hc/{hcId}/campos", campos, ct);
+
+    public Task<HorarioVigente?> HorarioAsync(int? cuentaId, CancellationToken ct = default) =>
+        LeerAsync<HorarioVigente>(RutaHorario(cuentaId), ct);
+
+    public Task<RespuestaApi> GuardarHorarioAsync(int? cuentaId, IReadOnlyList<TramoHorario> tramos, CancellationToken ct = default) =>
+        EnviarAsync(HttpMethod.Put, RutaHorario(cuentaId), tramos, ct);
+
+    public Task<IReadOnlyList<ParametroRegla>> ParametrosAsync(CancellationToken ct = default) =>
+        LeerListaAsync<ParametroRegla>("configuracion/reglas", ct);
+
+    /// <summary>El valor viaja como cadena JSON: es lo que espera la Api, que lo valida contra el tipo actual.</summary>
+    public Task<RespuestaApi> GuardarParametroAsync(string clave, string valor, CancellationToken ct = default) =>
+        EnviarAsync(HttpMethod.Put, $"configuracion/reglas/{Uri.EscapeDataString(clave)}", valor, ct);
+
+    private static string RutaHorario(int? cuentaId) =>
+        cuentaId is { } id ? $"configuracion/horario?cuentaId={id}" : "configuracion/horario";
+
+    private Task<RespuestaApi> EnviarAsync<T>(string ruta, T cuerpo, CancellationToken ct) =>
+        EnviarAsync(HttpMethod.Post, ruta, cuerpo, ct);
+
+    private Task<RespuestaApi> EnviarSinCuerpoAsync(HttpMethod metodo, string ruta, CancellationToken ct) =>
+        EnviarAsync<object?>(metodo, ruta, null, ct);
+
+    private async Task<RespuestaApi> EnviarAsync<T>(HttpMethod metodo, string ruta, T cuerpo, CancellationToken ct)
     {
         try
         {
             Autenticar();
 
-            var respuesta = await http.PostAsJsonAsync(ruta, cuerpo, ct);
+            using var peticion = new HttpRequestMessage(metodo, ruta)
+            {
+                Content = cuerpo is null ? null : JsonContent.Create(cuerpo)
+            };
+
+            var respuesta = await http.SendAsync(peticion, ct);
 
             return respuesta.IsSuccessStatusCode
                 ? RespuestaApi.Ok
@@ -127,7 +211,7 @@ public sealed class ClienteApi(HttpClient http, SesionAnalista sesion, ILogger<C
         }
         catch (Exception ex)
         {
-            log.LogError(ex, "Fallo el POST a {Ruta}.", ruta);
+            log.LogError(ex, "Fallo el {Metodo} a {Ruta}.", metodo, ruta);
 
             return new RespuestaApi(false, "No se pudo contactar a la Api.");
         }
@@ -166,19 +250,34 @@ public sealed class ClienteApi(HttpClient http, SesionAnalista sesion, ILogger<C
     /// <summary>La Api devuelve el motivo del rechazo en un campo suelto; se rescata para mostrarlo.</summary>
     private static async Task<string> MotivoAsync(HttpResponseMessage respuesta, CancellationToken ct)
     {
+        // Sin sesion o con otro rol la Api no manda motivo. Se traduce aca para que la pantalla no
+        // muestre "Forbidden" a quien no sabe que es.
+        if (respuesta.StatusCode == HttpStatusCode.Forbidden)
+            return await LeerMotivoAsync(respuesta, ct) ?? "Tu rol no permite hacer esto.";
+
+        if (respuesta.StatusCode == HttpStatusCode.Unauthorized)
+            return "Tu sesión expiró. Volvé a entrar.";
+
+        return await LeerMotivoAsync(respuesta, ct)
+            ?? respuesta.ReasonPhrase
+            ?? $"La Api respondio {(int)respuesta.StatusCode}.";
+    }
+
+    private static async Task<string?> LeerMotivoAsync(HttpResponseMessage respuesta, CancellationToken ct)
+    {
         try
         {
             var cuerpo = await respuesta.Content.ReadFromJsonAsync<Dictionary<string, object>>(ct);
 
             if (cuerpo?.TryGetValue("motivo", out var motivo) == true)
-                return motivo.ToString() ?? respuesta.ReasonPhrase ?? "Rechazado.";
+                return motivo.ToString();
         }
         catch
         {
-            // El cuerpo puede no ser JSON (un 500 crudo, por ejemplo). No vale la pena tratarlo
-            // distinto: para el analista es lo mismo, la accion no se pudo hacer.
+            // El cuerpo puede no ser JSON (un 500 crudo, o un 403 sin cuerpo). No vale la pena
+            // tratarlo distinto: para el analista es lo mismo, la accion no se pudo hacer.
         }
 
-        return respuesta.ReasonPhrase ?? $"La Api respondio {(int)respuesta.StatusCode}.";
+        return null;
     }
 }

@@ -1,14 +1,23 @@
 namespace RRHH.WhatsApp.Domain.Entidades;
 
 /// <summary>
-/// Convencion del enlace que se le manda al postulante. Vive aparte porque la arman dos lugares
-/// distintos —el servicio de invitaciones al crearla y la fabrica de contexto al recordarla— y
-/// tienen que producir exactamente la misma URL.
+/// Arma el enlace del formulario que el bot le manda al postulante (Regla 9).
 /// </summary>
 public static class EnlaceJobForms
 {
-    /// <summary>Parametro por el que viaja el token en la URL.</summary>
+    /// <summary>Parametro por el que viaja el token cuando la URL no dice donde ponerlo.</summary>
     public const string Parametro = "t";
+
+    /// <summary>
+    /// Marcador que la URL de la vacante puede traer para decir exactamente donde va el token.
+    /// <para>
+    /// Google Forms solo prellena parametros con la forma <c>entry.&lt;id&gt;=</c>, distinta en cada
+    /// formulario. Con un <c>?t=</c> al final, Google lo ignora y el token nunca llega a la respuesta:
+    /// el webhook recibiria un envio que no puede atribuir a ninguna postulacion. Por eso la URL de
+    /// la vacante se guarda con el marcador donde corresponda (V27).
+    /// </para>
+    /// </summary>
+    public const string Marcador = "{token}";
 
     /// <summary>
     /// Devuelve nulo si la vacante no tiene formulario configurado: es preferible omitir el envio
@@ -23,6 +32,11 @@ public static class EnlaceJobForms
         if (string.IsNullOrWhiteSpace(urlBase))
             return null;
 
+        if (urlBase.Contains(Marcador, StringComparison.OrdinalIgnoreCase))
+            return urlBase.Replace(Marcador, token.ToString("N"), StringComparison.OrdinalIgnoreCase);
+
+        // Sin marcador se agrega el parametro propio. Es lo que sirve para el formulario propio del
+        // dia que se migre a Razor Pages (D3), que lee el token de la query.
         var separador = urlBase.Contains('?') ? '&' : '?';
 
         return $"{urlBase}{separador}{Parametro}={token:N}";

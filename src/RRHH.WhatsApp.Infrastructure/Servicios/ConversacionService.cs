@@ -57,6 +57,32 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
             .Include(c => c.CuentaContexto)
             .FirstOrDefaultAsync(c => c.ConversacionId == conversacionId, ct);
 
+    public async Task<NivelAcceso> ObtenerAccesoAsync(
+        int conversacionId, int analistaId, CancellationToken ct = default)
+    {
+        var conversacion = await db.Conversaciones
+            .AsNoTracking()
+            .Where(c => c.ConversacionId == conversacionId)
+            .Select(c => new { c.AnalistaAtendiendoId, c.Estado })
+            .FirstOrDefaultAsync(ct);
+
+        if (conversacion is null)
+            return NivelAcceso.Ninguno;
+
+        // Regla 4: quien la atiende la trabaja. Regla 19: lo que el bot no pudo clasificar es de
+        // todos hasta que alguien lo tome, y para tomarlo hay que poder responder.
+        if (conversacion.AnalistaAtendiendoId == analistaId
+            || conversacion.Estado == EstadoConversacion.PendienteClasificar)
+            return NivelAcceso.Total;
+
+        // Sistemas ve todo para soporte y auditoria, pero ver no es atender: responder en un hilo
+        // ajeno le hablaria al postulante en nombre de un analista que no lo sabe.
+        return await EsSistemasAsync(analistaId, ct) ? NivelAcceso.Lectura : NivelAcceso.Ninguno;
+    }
+
+    private Task<bool> EsSistemasAsync(int analistaId, CancellationToken ct) =>
+        db.Analistas.AnyAsync(a => a.AnalistaId == analistaId && a.Rol == RolAnalista.Sistemas, ct);
+
     public async Task RegistrarEntradaAsync(int conversacionId, DateTime fechaUtc, CancellationToken ct = default)
     {
         var conversacion = await db.Conversaciones.FirstAsync(c => c.ConversacionId == conversacionId, ct);
@@ -125,6 +151,14 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
         if (analistaOrigenId == analistaDestinoId)
             throw new InvalidOperationException("No se puede transferir una conversacion al mismo analista.");
 
+        // V23: Jefatura y Sistemas no atienden conversaciones. Pasarles una la dejaria con alguien
+        // que no la va a responder, o que por la Regla 4 no deberia actuar sobre ella.
+        var destinoAtiende = await db.Analistas.AnyAsync(
+            a => a.AnalistaId == analistaDestinoId && a.Activo && a.Rol == RolAnalista.Analista, ct);
+
+        if (!destinoAtiende)
+            throw new InvalidOperationException("Solo se puede transferir a un analista activo que atienda conversaciones.");
+
         var conversacion = await db.Conversaciones.FirstAsync(c => c.ConversacionId == conversacionId, ct);
 
         // Regla 8: de uno en uno. Una transferencia pendiente bloquea otra hasta que se responda.
@@ -186,7 +220,9 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
         // FirstOrDefault y no First: con First, un id inexistente propaga el "Sequence contains no
         // elements" de EF hasta la respuesta HTTP, que no le dice nada a quien llama.
         var transferencia = await db.Transferencias
+            .Include(t => t.AnalistaDestino)
             .Include(t => t.Conversacion)
+                .ThenInclude(c => c!.Postulante)
             .FirstOrDefaultAsync(t => t.TransferenciaId == transferenciaId, ct)
             ?? throw new KeyNotFoundException($"No existe la transferencia {transferenciaId}.");
 
@@ -207,7 +243,42 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
         db.Auditorias.Add(Auditar(nameof(Transferencia), transferenciaId, analistaDestinoId,
             aceptada ? "TransferenciaAceptada" : "TransferenciaRechazada", null));
 
-        await db.SaveChangesAsync(ct);
+        // Regla 8: el origen tambien tiene que enterarse. Si la rechazaron, el hilo sigue siendo suyo
+        // y le toca derivarlo a otro; sin este aviso no sabria que tiene que hacerlo, y el
+        // postulante quedaria esperando entre dos analistas que creen que lo atiende el otro.
+        var destino = transferencia.AnalistaDestino?.Nombre ?? "El analista destino";
+        var sobre = (transferencia.Conversacion?.Postulante?.NombreCompleto
+            ?? transferencia.Conversacion?.TelefonoE164) is { } quien ? $" ({quien})" : string.Empty;
+
+        db.EventosSistema.Add(new EventoSistema
+        {
+            Tipo = "AnalistaNotificado",
+            Payload = JsonSerializer.Serialize(new
+            {
+                AnalistaId = transferencia.AnalistaOrigenId,
+                Mensaje = aceptada
+                    ? $"{destino} aceptó la conversación que le transferiste{sobre}."
+                    : $"{destino} rechazó la transferencia{sobre}: la conversación sigue con vos.",
+                transferencia.ConversacionId
+            }),
+            CorrelationId = Guid.NewGuid(),
+            FechaCreacion = DateTime.UtcNow
+        });
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // RowVersion de Transferencia y de Conversacion (Seccion 9.6.2): otra respuesta, o el
+            // Worker escalando el mismo hilo, llego primero. Es un rechazo de negocio y no un 500:
+            // lo que corresponde es recargar y mirar el estado nuevo, no reintentar a ciegas.
+            db.ChangeTracker.Clear();
+
+            throw new InvalidOperationException(
+                "La transferencia cambió mientras respondías. Recargá la bandeja y volvé a intentarlo.");
+        }
     }
 
     public async Task<IReadOnlyList<Transferencia>> ListarTransferenciasPendientesAsync(
@@ -217,6 +288,8 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
             .Include(t => t.AnalistaOrigen)
             .Include(t => t.Conversacion)
                 .ThenInclude(c => c!.Postulante)
+            .Include(t => t.Conversacion)
+                .ThenInclude(c => c!.CuentaContexto)
             .Where(t => t.AnalistaDestinoId == analistaDestinoId
                      && t.Estado == EstadoTransferencia.Pendiente)
             .OrderBy(t => t.Fecha)
@@ -314,14 +387,25 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
     }
 
 
-    public async Task<IReadOnlyList<Conversacion>> BuscarPorDniAsync(string dni, CancellationToken ct = default) =>
-        await db.Conversaciones
+    public async Task<IReadOnlyList<Conversacion>> BuscarPorDniAsync(
+        string dni, int analistaId, CancellationToken ct = default)
+    {
+        var consulta = db.Conversaciones
             .AsNoTracking()
             .Include(c => c.Postulante)
             .Include(c => c.CuentaContexto)
-            .Where(c => c.Postulante != null && c.Postulante.Dni == dni)
+            .Where(c => c.Postulante != null && c.Postulante.Dni == dni);
+
+        // Reglas 4 y 6: el buscador trae el chat propio; no es una puerta a las conversaciones de
+        // otras cuentas. Mismo criterio que la bandeja: quien la atiende, o Sistemas.
+        if (!await EsSistemasAsync(analistaId, ct))
+            consulta = consulta.Where(c => c.AnalistaAtendiendoId == analistaId);
+
+        return await consulta
             .OrderByDescending(c => c.FechaUltimaActividad)
             .ToListAsync(ct);
+    }
+
     public async Task<IReadOnlyList<Conversacion>> ListarPendientesClasificarAsync(CancellationToken ct = default) =>
         await db.Conversaciones
             .Include(c => c.Postulante)

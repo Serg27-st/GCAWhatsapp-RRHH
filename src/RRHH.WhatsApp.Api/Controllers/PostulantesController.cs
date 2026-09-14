@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using RRHH.WhatsApp.Api.Seguridad;
 using RRHH.WhatsApp.Domain.Interfaces;
 
 namespace RRHH.WhatsApp.Api.Controllers;
@@ -11,11 +13,16 @@ namespace RRHH.WhatsApp.Api.Controllers;
 [Route("postulantes")]
 public sealed class PostulantesController(
     IPostulanteService postulantes,
+    ICuentaService cuentas,
     ILogger<PostulantesController> log) : ControllerBase
 {
     /// <summary>
-    /// Historial completo a traves de todas las cuentas. El flujo lo pide para mostrarselo al
-    /// analista cuando el DNI ya existe (Seccion 6.1).
+    /// Historial previo del postulante, que el flujo pide mostrarle al analista cuando el DNI ya
+    /// existe (Seccion 6.1).
+    /// <para>
+    /// Es el de las cuentas de quien pregunta. Lo que la persona hizo en otras cuentas es de otros
+    /// analistas, y de eso la bandeja ya da el aviso generico de la Regla 6. Sistemas lo ve completo.
+    /// </para>
     /// </summary>
     [HttpGet("{dni}/historial")]
     public async Task<IActionResult> Historial(string dni, CancellationToken ct)
@@ -26,6 +33,20 @@ public sealed class PostulantesController(
             return NotFound();
 
         var historial = await postulantes.ObtenerHistorialAsync(dni, ct);
+
+        if (!User.EsSistemas())
+        {
+            var propias = (await cuentas.ListarDeAnalistaAsync(User.AnalistaId(), ct))
+                .Select(c => c.Cuenta.CuentaId)
+                .ToHashSet();
+
+            historial = [.. historial.Where(p => propias.Contains(p.CuentaId))];
+
+            // Sin nada en sus cuentas, la persona no es asunto de este analista: devolver su
+            // nombre confirmaria que ese DNI esta en proceso en otra cuenta.
+            if (historial.Count == 0)
+                return NotFound();
+        }
 
         return Ok(new
         {
@@ -47,8 +68,13 @@ public sealed class PostulantesController(
     /// <summary>
     /// Regla 17: solicitud de eliminacion de datos personales. Anonimiza en vez de borrar filas,
     /// para no llevarse por delante las metricas historicas de la Regla 18.
+    /// <para>
+    /// Solo Sistemas: anonimiza a la persona en todas las cuentas, y no puede decidirlo un analista
+    /// que por la Regla 4 ve solo la suya.
+    /// </para>
     /// </summary>
     [HttpDelete("{dni}")]
+    [Authorize(Roles = ClaimsAnalista.RolSistemas)]
     public async Task<IActionResult> Eliminar(
         string dni, [FromQuery] string? motivo, CancellationToken ct)
     {
@@ -56,6 +82,8 @@ public sealed class PostulantesController(
         {
             await postulantes.AnonimizarDatosAsync(
                 dni, motivo ?? "Solicitud del titular de los datos.", ct);
+
+            log.LogInformation("El analista {AnalistaId} anonimizo los datos de un postulante.", User.AnalistaId());
 
             return NoContent();
         }

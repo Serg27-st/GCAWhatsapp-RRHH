@@ -185,6 +185,9 @@ public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionServ
             .OrderByDescending(p => p.FechaUltimaActividad)
             .ToListAsync(ct);
 
+    public Task<Postulacion?> ObtenerPorIdAsync(int postulacionId, CancellationToken ct = default) =>
+        db.Postulaciones.AsNoTracking().FirstOrDefaultAsync(p => p.PostulacionId == postulacionId, ct);
+
     public async Task<EstadoPostulacion?> ObtenerEstadoAsync(int postulacionId, CancellationToken ct = default) =>
         await db.Postulaciones
             .AsNoTracking()

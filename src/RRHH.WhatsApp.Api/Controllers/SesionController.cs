@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using RRHH.WhatsApp.Api.Configuracion;
 using RRHH.WhatsApp.Api.Seguridad;
+using Microsoft.Extensions.Options;
 using RRHH.WhatsApp.Contracts.Seguridad;
+using RRHH.WhatsApp.Domain.Enums;
 using RRHH.WhatsApp.Domain.Interfaces;
 
 namespace RRHH.WhatsApp.Api.Controllers;
@@ -22,6 +24,7 @@ public sealed class SesionController(
     IAutenticacionService autenticacion,
     IAnalistaService analistas,
     EmisorTokens emisor,
+    IOptions<OpcionesArranque> arranque,
     ILogger<SesionController> log) : ControllerBase
 {
     [HttpPost("login")]
@@ -85,7 +88,7 @@ public sealed class SesionController(
     [HttpPut("analistas/{id:int}/contrasena")]
     [Authorize(Roles = ClaimsAnalista.RolSistemas)]
     public async Task<IActionResult> Restablecer(
-        int id, [FromBody] PeticionArranque peticion, CancellationToken ct)
+        int id, [FromBody] PeticionRestablecerContrasena peticion, CancellationToken ct)
     {
         try
         {
@@ -109,6 +112,12 @@ public sealed class SesionController(
     /// puerta se cierra sola y para siempre — no hay forma de volver a abrirla sin vaciar la
     /// columna en la base, que ya es acceso de administrador.
     /// </para>
+    /// <para>
+    /// Es solo para Sistemas (V25): es el unico rol que despues puede restablecer las contraseñas de
+    /// los demas, asi que una primera contraseña de otro rol cerraria la puerta y dejaria a todos
+    /// afuera. En una base nueva todavia no hay analistas: si el correo es el configurado en
+    /// <c>Arranque:EmailSistemas</c>, se lo da de alta aca con rol Sistemas.
+    /// </para>
     /// </summary>
     [HttpPost("arranque")]
     [AllowAnonymous]
@@ -117,14 +126,43 @@ public sealed class SesionController(
         if (!await autenticacion.SinContrasenasAsync(ct))
             return Conflict(new { motivo = "Ya hay contraseñas configuradas. Use el restablecimiento." });
 
-        var analista = (await analistas.ListarActivosAsync(ct))
-            .FirstOrDefault(a => a.Email == peticion.Email?.Trim());
+        var email = peticion.Email?.Trim() ?? string.Empty;
 
-        if (analista is null)
+        // El alta guarda el correo en minusculas: compararlo tal cual lo escribio quien arranca dejaria
+        // afuera a "Sistemas@Empresa.pe" sin decir por que.
+        var analista = (await analistas.ListarActivosAsync(ct))
+            .FirstOrDefault(a => string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
+
+        if (analista is not null && analista.Rol != RolAnalista.Sistemas)
+        {
+            return UnprocessableEntity(new
+            {
+                motivo = $"El arranque es para un analista de Sistemas, y {analista.Email} tiene rol {analista.Rol}: " +
+                         "solo Sistemas puede despues restablecer las contraseñas de los demás."
+            });
+        }
+
+        // Sin analista con ese correo —tipicamente, una base nueva— solo se crea el de Sistemas que se
+        // configuro en el servidor. La Api recibe el webhook de Meta y es alcanzable desde internet:
+        // sin esa condicion, cualquiera que llegara primero a un despliegue recien publicado se daria
+        // de alta con visibilidad total.
+        if (analista is null && !arranque.Value.Admite(email))
             return NotFound(new { motivo = "No hay un analista activo con ese correo." });
 
         try
         {
+            if (analista is null)
+            {
+                analista = await analistas.CrearAsync(
+                    string.IsNullOrWhiteSpace(peticion.Nombre) ? "Sistemas" : peticion.Nombre,
+                    email, RolAnalista.Sistemas, ct);
+
+                log.LogWarning(
+                    "Arranque: se dio de alta el analista de Sistemas {Email}, que no existia.", analista.Email);
+            }
+
+            // Si la contraseña no sirve, el analista recien creado queda sin ella y la puerta sigue
+            // abierta: reintentar con una valida lo completa.
             await autenticacion.EstablecerContrasenaAsync(analista.AnalistaId, peticion.Contrasena, ct);
 
             log.LogWarning(

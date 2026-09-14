@@ -73,8 +73,18 @@ public interface IConversacionService
     /// <summary>Bandeja del analista. El rol Sistemas ve todas las conversaciones (Regla 4).</summary>
     Task<IReadOnlyList<Conversacion>> ListarParaAnalistaAsync(int analistaId, CancellationToken ct = default);
 
-    /// <summary>Buscador por DNI de la Seccion 7: trae el hilo del postulante, si ya se identifico.</summary>
-    Task<IReadOnlyList<Conversacion>> BuscarPorDniAsync(string dni, CancellationToken ct = default);
+    /// <summary>
+    /// Buscador por DNI de la Seccion 7: trae el hilo del postulante, si ya se identifico. Respeta
+    /// la Regla 4 igual que la bandeja: un analista encuentra lo que atiende; Sistemas, todo.
+    /// </summary>
+    Task<IReadOnlyList<Conversacion>> BuscarPorDniAsync(
+        string dni, int analistaId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Regla 4: que puede hacer el analista con este hilo. La Api lo consulta antes de cualquier
+    /// accion sobre una conversacion: tener sesion no alcanza para leer o responder una ajena.
+    /// </summary>
+    Task<NivelAcceso> ObtenerAccesoAsync(int conversacionId, int analistaId, CancellationToken ct = default);
 
     /// <summary>Regla 19: bandeja general de pendientes por clasificar, visible para todos.</summary>
     Task<IReadOnlyList<Conversacion>> ListarPendientesClasificarAsync(CancellationToken ct = default);
@@ -198,6 +208,12 @@ public interface ICuentaService
     Task<IReadOnlyList<(Cuenta Cuenta, bool EsBackup, int VacantesAbiertas)>> ListarDeAnalistaAsync(
         int analistaId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Regla 4 por cuenta: el titular y el respaldo trabajan lo de su cuenta —el tablero, las
+    /// tarjetas—; Sistemas lo ve sin actuar; el resto no lo ve.
+    /// </summary>
+    Task<NivelAcceso> ObtenerAccesoAsync(int cuentaId, int analistaId, CancellationToken ct = default);
+
     /// <summary>Alta de cliente. El nombre es unico: es como el analista lo reconoce en la bandeja.</summary>
     Task<Cuenta> CrearAsync(string nombre, CancellationToken ct = default);
 
@@ -300,6 +316,9 @@ public interface IPostulacionService
     Task<IReadOnlyList<Postulacion>> ObtenerTableroPorPostulanteAsync(
         int postulanteId, CancellationToken ct = default);
 
+    /// <summary>Una postulacion por id, sin seguimiento. Nula si no existe.</summary>
+    Task<Postulacion?> ObtenerPorIdAsync(int postulacionId, CancellationToken ct = default);
+
     /// <summary>Desenlace actual de una postulacion. Nulo si no existe.</summary>
     Task<EstadoPostulacion?> ObtenerEstadoAsync(int postulacionId, CancellationToken ct = default);
 
@@ -346,6 +365,12 @@ public interface IJobFormsService
 
     /// <summary>Regla 17: el postulante acepto el aviso de privacidad vigente.</summary>
     Task<bool> ValidarConsentimientoAsync(JobFormsRespuesta respuesta, CancellationToken ct = default);
+
+    /// <summary>
+    /// La respuesta ya guardada de esa invitacion, si existe. Es lo que permite reconocer un envio
+    /// repetido sin volver a procesarlo (V27).
+    /// </summary>
+    Task<JobFormsRespuesta?> ObtenerRespuestaDeInvitacionAsync(int invitacionId, CancellationToken ct = default);
 
     /// <summary>
     /// Regla 17: respuestas cuyo CV ya cumplio el plazo de retencion. Es lo que consume el job de
@@ -402,6 +427,12 @@ public interface IAusenciaService
     Task<Ausencia> RegistrarAsync(int analistaId, DateTime inicio, DateTime fin, string? motivo, CancellationToken ct = default);
 
     Task<bool> EstaAusenteAsync(int analistaId, DateTime momento, CancellationToken ct = default);
+
+    /// <summary>Las que terminan despues de <paramref name="desdeUtc"/>: en curso y programadas.</summary>
+    Task<IReadOnlyList<Ausencia>> ListarVigentesAsync(int analistaId, DateTime desdeUtc, CancellationToken ct = default);
+
+    /// <summary>Cancela una ausencia de ese analista. False si no existe o es de otro.</summary>
+    Task<bool> EliminarAsync(int analistaId, int ausenciaId, CancellationToken ct = default);
 }
 
 /// <summary>Regla 3: valida si un mensaje entrante llega dentro del horario laboral configurado.</summary>
@@ -478,6 +509,9 @@ public interface IEscanerAntivirus
 public interface IConfiguracionReglasService
 {
     Task<IReadOnlyDictionary<string, string>> ObtenerTodasAsync(CancellationToken ct = default);
+
+    /// <summary>Los parametros con su descripcion, para administrarlos. Sin cache: se pide rara vez.</summary>
+    Task<IReadOnlyList<ConfiguracionRegla>> ListarAsync(CancellationToken ct = default);
 
     Task EstablecerAsync(string clave, string valor, CancellationToken ct = default);
 }

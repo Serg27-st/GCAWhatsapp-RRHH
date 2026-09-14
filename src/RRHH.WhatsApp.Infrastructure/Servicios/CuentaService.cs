@@ -90,6 +90,19 @@ public sealed class CuentaService(RrhhDbContext db) : ICuentaService
         return [.. filas.Select(f => (f.Cuenta!, f.EsBackup, f.Abiertas))];
     }
 
+    public async Task<NivelAcceso> ObtenerAccesoAsync(int cuentaId, int analistaId, CancellationToken ct = default)
+    {
+        // El respaldo es de la cuenta, no una visita: la Regla 2 le pasa las conversaciones y la
+        // 14 las nuevas mientras el titular esta ausente, y tiene que poder seguir el tablero.
+        if (await db.AnalistaCuentas.AnyAsync(ac => ac.CuentaId == cuentaId && ac.AnalistaId == analistaId, ct))
+            return NivelAcceso.Total;
+
+        var esSistemas = await db.Analistas.AnyAsync(
+            a => a.AnalistaId == analistaId && a.Rol == RolAnalista.Sistemas, ct);
+
+        return esSistemas ? NivelAcceso.Lectura : NivelAcceso.Ninguno;
+    }
+
 
     public async Task<Cuenta> CrearAsync(string nombre, CancellationToken ct = default)
     {
@@ -134,8 +147,18 @@ public sealed class CuentaService(RrhhDbContext db) : ICuentaService
         if (!await db.Cuentas.AnyAsync(c => c.CuentaId == cuentaId, ct))
             throw new InvalidOperationException($"No existe la cuenta {cuentaId}.");
 
-        if (!await db.Analistas.AnyAsync(a => a.AnalistaId == analistaId && a.Activo, ct))
-            throw new InvalidOperationException($"No existe un analista activo con id {analistaId}.");
+        var analista = await db.Analistas
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a => a.AnalistaId == analistaId && a.Activo, ct)
+            ?? throw new InvalidOperationException($"No existe un analista activo con id {analistaId}.");
+
+        // V23: Jefatura y Sistemas no atienden conversaciones. Como titular o respaldo, la Regla 1 o la
+        // 2 les pasarian conversaciones que nadie va a responder.
+        if (analista.Rol != RolAnalista.Analista)
+        {
+            throw new InvalidOperationException(
+                $"{analista.Nombre} tiene rol {analista.Rol}: solo un analista que atiende conversaciones puede cubrir una cuenta.");
+        }
 
         var asignaciones = await db.AnalistaCuentas.Where(ac => ac.CuentaId == cuentaId).ToListAsync(ct);
 
@@ -143,19 +166,27 @@ public sealed class CuentaService(RrhhDbContext db) : ICuentaService
         // (AnalistaId, CuentaId): un analista tiene una sola fila por cuenta, con un solo rol.
         var existente = asignaciones.FirstOrDefault(ac => ac.AnalistaId == analistaId);
 
+        // Regla 1: la cuenta tiene un titular, y la 2 un respaldo. Se reemplaza a quien ocupa el lugar
+        // en vez de acumular: con dos titulares, el enrutamiento elegiria uno de forma arbitraria.
+        var ocupante = asignaciones.FirstOrDefault(ac => ac.EsBackup == esBackup && ac.AnalistaId != analistaId);
+
+        if (ocupante is not null)
+        {
+            db.AnalistaCuentas.Remove(ocupante);
+
+            // El respaldo que pasa a titular, o al reves: el ocupante se saca primero y aparte. EF no
+            // sabe que EsBackup es parte del filtro del indice unico, y podria mandar el cambio de rol
+            // antes que el borrado; por un instante habria dos titulares y SQL Server lo rechazaria.
+            if (existente is not null)
+                await db.SaveChangesAsync(ct);
+        }
+
         if (existente is not null)
         {
             existente.EsBackup = esBackup;
         }
         else
         {
-            // Regla 1: la cuenta tiene un titular, y la 2 un respaldo. Se reemplaza en vez de
-            // acumular: con dos titulares, el enrutamiento elegiria uno de forma arbitraria.
-            var ocupante = asignaciones.FirstOrDefault(ac => ac.EsBackup == esBackup);
-
-            if (ocupante is not null)
-                db.AnalistaCuentas.Remove(ocupante);
-
             db.AnalistaCuentas.Add(new AnalistaCuenta
             {
                 CuentaId = cuentaId,

@@ -1,0 +1,31 @@
+/* Pantallas de administracion (V23): vacantes, equipo, configuracion y la cuenta propia. */
+.admin { padding: 1rem; max-width: 1100px; }
+.admin h1 { margin: 0 0 1rem; }
+
+.admin section {
+    background: var(--panel);
+    border: 1px solid var(--borde);
+    border-radius: 6px;
+    padding: 0.8rem;
+    margin-bottom: 1rem;
+}
+
+.admin section h2 { margin: 0 0 0.6rem; display: flex; gap: 0.5rem; align-items: center; }
+.admin .bloque { display: block; }
+.admin .tabla { margin-bottom: 0.6rem; }
+.admin .tabla td { vertical-align: top; }
+.admin .tabla .form-control, .admin .tabla .form-select { padding: 0.25rem 0.4rem; }
+
+.admin .fila-form { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-top: 0.6rem; }
+.admin .fila-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; color: var(--tenue); }
+.admin .fila-form .form-control, .admin .fila-form .form-select { width: auto; min-width: 150px; }
+.admin .fila-form label.casilla { flex-direction: row; align-items: center; gap: 0.35rem; font-size: 0.85rem; color: var(--texto); }
+
+.admin .acciones { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.admin .ok { color: #2e7d32; margin: 0.5rem 0 0; }
+.admin .subpanel { margin: 0.3rem 0 0.6rem; padding: 0.6rem; background: var(--fondo); border-radius: 5px; }
+
+/* Lo que conviene pensar dos veces: el tope de envio protege la linea de otro bloqueo. */
+.admin .riesgo { display: block; margin-top: 0.2rem; font-size: 0.78rem; color: var(--aviso); }
+
+.chip.sin-formulario { background: var(--aviso-fondo); color: var(--aviso); border-color: transparent; }

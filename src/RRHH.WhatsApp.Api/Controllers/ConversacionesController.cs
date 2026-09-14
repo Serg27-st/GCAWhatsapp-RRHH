@@ -9,12 +9,13 @@ using RRHH.WhatsApp.Domain.Interfaces;
 namespace RRHH.WhatsApp.Api.Controllers;
 
 /// <summary>
-/// La bandeja del analista (Seccion 7). Todo lo que expone es interno: no hay login todavia, asi
-/// que el `analistaId` viaja como parametro y estos endpoints deben quedar detras de la
-/// autenticacion antes de salir a produccion (Seccion 9.6.1).
+/// La bandeja del analista (Seccion 7). El analista sale del token, y toda accion con <c>{id}</c>
+/// pasa antes por <see cref="FiltroAccesoConversacion"/>: tener sesion no alcanza para leer o
+/// responder una conversacion ajena (Regla 4, V22 de docs/decisiones.md).
 /// </summary>
 [ApiController]
 [Route("conversaciones")]
+[TypeFilter<FiltroAccesoConversacion>]
 public sealed class ConversacionesController(
     IConversacionService conversaciones,
     IMensajeService mensajes,
@@ -50,14 +51,17 @@ public sealed class ConversacionesController(
         return Ok(hilos.Select(c => c.AResumen()));
     }
 
-    /// <summary>Buscador por DNI de la Seccion 7: trae directamente el chat del postulante.</summary>
+    /// <summary>
+    /// Buscador por DNI de la Seccion 7: trae directamente el chat del postulante, si es de quien
+    /// busca (Reglas 4 y 6). Sistemas los encuentra todos.
+    /// </summary>
     [HttpGet("buscar")]
     public async Task<IActionResult> Buscar([FromQuery] string dni, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dni))
             return BadRequest(new { motivo = "Falta el DNI." });
 
-        var hilos = await conversaciones.BuscarPorDniAsync(dni.Trim(), ct);
+        var hilos = await conversaciones.BuscarPorDniAsync(dni.Trim(), User.AnalistaId(), ct);
 
         return Ok(hilos.Select(c => c.AResumen()));
     }
@@ -80,14 +84,24 @@ public sealed class ConversacionesController(
                 .Select(c => c.Nombre).ToList()
             : [];
 
-        var propias = conversacion.PostulanteId is { } id2
-            ? (await postulaciones.ObtenerTableroPorPostulanteAsync(id2, ct)).Select(p => p.AResumen()).ToList()
+        // Regla 6 otra vez: las postulaciones de la persona en otras cuentas son de otros
+        // analistas. De esas ya esta el aviso generico de arriba; el detalle —vacante, etapa— se
+        // limita a la cuenta sobre la que se conversa. Sistemas ve todas (Regla 4).
+        var visibles = conversacion.PostulanteId is { } persona
+            ? (await postulaciones.ObtenerTableroPorPostulanteAsync(persona, ct))
+                .Where(p => User.EsSistemas() || p.CuentaId == conversacion.CuentaContextoId)
+                .Select(p => p.AResumen())
+                .ToList()
             : [];
+
+        // El filtro ya dejo el nivel. Lectura es Sistemas mirando algo que atiende otro.
+        var soloLectura = HttpContext.Items[FiltroAccesoConversacion.ClaveNivel] is not NivelAcceso.Total;
 
         return Ok(new ConversacionDetalle(
             conversacion.AResumen(otrasCuentas),
             [.. hilo.Select(m => m.AResumen())],
-            propias));
+            visibles,
+            soloLectura));
     }
 
     /// <summary>Regla 15: es aca donde se aplica el limite de opt-in y la ventana de 24h.</summary>
@@ -145,27 +159,22 @@ public sealed class ConversacionesController(
         if (!Enum.TryParse<TipoEstadoPostulante>(peticion.Tipo, ignoreCase: true, out var tipo))
             return BadRequest(new { motivo = $"Tipo '{peticion.Tipo}' desconocido. Use Whitelist o Blacklist." });
 
+        // El filtro garantiza que la conversacion es de quien marca, pero el postulante y la cuenta
+        // llegan en el cuerpo. Sin contrastarlos, bastaria abrir un chat propio para descartar a
+        // alguien en la cuenta de otro analista (Reglas 4 y 6).
+        var conversacion = await conversaciones.ObtenerPorIdAsync(id, ct);
+
+        if (conversacion is null
+            || conversacion.PostulanteId != peticion.PostulanteId
+            || conversacion.CuentaContextoId != peticion.CuentaId)
+        {
+            return UnprocessableEntity(new { motivo = "El postulante o la cuenta no corresponden a esta conversación." });
+        }
+
         try
         {
             await acciones.MarcarAsync(
                 peticion.PostulanteId, peticion.CuentaId, tipo, peticion.Motivo, User.AnalistaId(), ct);
-
-            return NoContent();
-        }
-        catch (InvalidOperationException ex)
-        {
-            return UnprocessableEntity(new { motivo = ex.Message });
-        }
-    }
-
-    /// <summary>Regla 13: mueve la postulacion entre columnas del tablero.</summary>
-    [HttpPost("{id:int}/etapa")]
-    public async Task<IActionResult> MoverEtapa(
-        int id, [FromBody] PeticionMoverEtapa peticion, CancellationToken ct)
-    {
-        try
-        {
-            await acciones.MoverEtapaAsync(peticion.PostulacionId, peticion.EtapaId, User.AnalistaId(), ct);
 
             return NoContent();
         }

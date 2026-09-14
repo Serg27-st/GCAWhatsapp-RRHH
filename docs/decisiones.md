@@ -222,8 +222,8 @@ escalamiento (Regla 2) se calculaban bien y no llegaban a ninguna persona. La tr
 (Regla 8) directamente no avisaba: el destino nunca sabía que tenía algo esperando su respuesta.
 
 **Lo que sigue pendiente:** con más de una instancia de Api haría falta un backplane (Redis) para
-que un aviso llegue al analista conectado a otra instancia, y el grupo del hub se toma hoy por el
-id que manda el cliente, porque no hay autenticación (Sección 9.6.1).
+que un aviso llegue al analista conectado a otra instancia. El grupo del hub ya sale del token, no
+de lo que pida el cliente (ver V20).
 
 ### V17 — El titular de una cuenta también lleva índice único
 
@@ -301,6 +301,210 @@ administración, que sería una credencial más que custodiar.
 refresh agrega una credencial de larga vida que hay que poder revocar, y revocar necesita estado
 que hoy no existe. El claim `jti` ya está emitido para cuando haga falta.
 
+### V21 — La transferencia se responde desde la bandeja, sin abrir el chat
+
+**Problema:** la Regla 8 tenía el endpoint para aceptar o rechazar, pero ninguna pantalla lo usaba
+ni ninguna consulta decía qué estaba esperando respuesta. Una transferencia no urgente avisaba al
+destino y ahí terminaba: el hilo se quedaba con el origen para siempre y, como solo puede haber una
+pendiente por conversación, tampoco se podía derivar a otro.
+
+**Decisión:** `GET /transferencias/pendientes` lista lo que espera al analista del token, y la
+bandeja lo muestra arriba de la lista en cualquier pestaña. Se decide con lo que trae la tarjeta
+—de quién viene, de qué cuenta, sobre quién y el comentario— y no abriendo el chat: el panel del
+chat trae la caja de respuesta, y el destino podría escribirle al postulante en un hilo que todavía
+no aceptó.
+
+**El origen también se entera:** aceptar y rechazar le llegan por el canal en vivo. Rechazar deja
+el hilo con él, y sin el aviso no sabría que le toca derivarlo a otro.
+
+**Queda abierto:** una transferencia que el destino nunca contesta sigue bloqueando cualquier otra
+para esa conversación. Hacerla vencer, o dejar que el origen la retire, depende del criterio de
+urgencia que RRHH todavía no confirmó (Sección 12 del dossier).
+
+### V22 — La Regla 4 separa ver de actuar, y se aplica en la frontera HTTP
+
+**Problema:** con el token la Api sabía quién pedía, pero solo lo usaba para armar la lista.
+Cualquier analista podía abrir cualquier conversación por su id, responderle, transferírsela a sí
+mismo como urgente o descartar al postulante en la cuenta de otro. El buscador por DNI y el tablero
+cruzaban cuentas, y el detalle del chat mostraba las postulaciones de la persona en todas ellas,
+que es justo el detalle que la Regla 6 dice que no se ve.
+
+**Decisión:** un `NivelAcceso` —ninguno, lectura, total— con un solo criterio por objeto:
+
+- **Conversación:** la trabaja quien la atiende, y cualquiera si está sin clasificar (Regla 19).
+- **Cuenta** (tablero y tarjetas): la trabajan su titular y su respaldo. El respaldo cuenta como de
+  la cuenta porque la Regla 2 le pasa las conversaciones y la 14 las nuevas.
+- **Sistemas** ve todo y no actúa. El dossier le da "visibilidad total para soporte y auditoría";
+  responder en un hilo ajeno le hablaría al postulante en nombre de alguien que no lo sabe.
+
+Quien no ve recibe 404, no 403: un 403 le confirmaría que el id existe. Quien ve pero no puede
+actuar recibe 403 con el motivo.
+
+**Dónde se aplica:** en un filtro del controlador de conversaciones, no dentro de cada acción. Una
+acción nueva queda cubierta sin que nadie se acuerde, con el mismo razonamiento que la política de
+autorización de respaldo (V20). Una prueba falla si el controlador pierde el filtro. `marcar` además
+contrasta el postulante y la cuenta del cuerpo contra la conversación de la ruta.
+
+**Desvío de la Sección 9.4:** mover la tarjeta pasa a `POST /postulaciones/{id}/etapa`. Con la ruta
+del dossier el tablero mandaba el id de la postulación donde la Api esperaba el de una
+conversación, y ningún control podía validar el objeto correcto.
+
+**Criterios a confirmar con RRHH:**
+
+- El historial por DNI (Sección 6.1) se muestra con las cuentas del analista; de las demás queda el
+  aviso genérico de la Regla 6. Si RRHH lo quiere completo, choca con la Regla 6 y hay que elegir.
+- Aceptar una transferencia pasa el hilo, no la cuenta: el destino no ve el tablero de la vacante de
+  origen si esa cuenta no es suya.
+- Anonimizar a un postulante (`DELETE /postulantes/{dni}`) queda para Sistemas, porque borra en
+  todas las cuentas.
+
+**Lo que no cubre:** la administración —cuentas, analistas, vacantes, horario, parámetros— y el
+panel de métricas quedaban abiertos a cualquier analista con sesión. Es otra pregunta (quién
+administra, no quién ve) y la resuelve V23.
+
+### V23 — Rol Jefatura, y quién administra qué
+
+**Dossier:** define dos roles, Analista y Sistemas (Sección 9.2). Pero la Regla 14 dice que la
+ausencia la marca "el analista (o su jefe)", y la 18 es un panel "para gerencia". Ninguno de los
+dos roles es ese jefe.
+
+**Problema:** cualquier analista con sesión podía dar de alta cuentas y analistas, cambiar el
+titular de una cuenta ajena, tocar el horario, cambiar las 2 horas del escalamiento, el tope de
+envío o los días de retención de CVs, cerrar vacantes de otras cuentas, registrarle una ausencia a
+un compañero —lo que le desvía sus conversaciones nuevas— y ver la actividad de todos.
+
+**Decisión (confirmada con el usuario):** un tercer rol, **Jefatura**. Ve el panel de métricas,
+registra ausencias de cualquiera y decide quién es titular y respaldo de cada cuenta. No ve
+conversaciones ajenas ni las recibe por transferencia. **Sistemas** conserva todo lo de Jefatura y
+además la estructura: alta de cuentas y analistas, horario y parámetros. Las **vacantes** las maneja
+quien trabaja la cuenta, porque es quien las abre y les arma el formulario (Reglas 9 y 20), y
+Sistemas como soporte. Cada analista registra **su propia ausencia**.
+
+Se prefirió a darle el rol Sistemas a gerencia porque Sistemas ve todas las conversaciones: para
+mirar un panel agregado es mucho más de lo que hace falta.
+
+**Cómo se hace cumplir:** dos políticas con nombre, `Estructura` y `Jefatura`, sobre la de respaldo
+que exige sesión. Lo que depende del recurso —de qué cuenta es la vacante, de quién es la
+ausencia— se decide en el controlador, porque una política por rol no lo sabe. Una prueba recorre
+todos los controladores y falla si aparece una escritura sin dueño declarado: política, rol,
+público, o una entrada explícita en la lista de las que verifican en el código.
+
+**Sin migración:** el rol se guarda como entero, y `Jefatura` es un valor nuevo del enum.
+
+### V24 — Un candado de SQL Server garantiza un solo Worker activo
+
+**Problema:** `EventosSistema` no tiene reserva por fila. Dos Workers tomarían el mismo evento y
+podrían enviar el mismo WhatsApp dos veces, que es el patrón que causó el bloqueo original. Estaba
+documentado como "correr una sola instancia", y en desarrollo quedaron dos corriendo sin que nadie
+lo notara; el health tampoco, porque los dos latían sobre la misma fila.
+
+**Decisión:** el Worker toma `sp_getapplock` en modo sesión antes de arrancar sus bucles y lo
+mantiene mientras vive. Una segunda instancia queda en espera y toma el relevo si la primera muere.
+
+**Por qué en la base y no un mutex o un archivo:** es lo único que ven todas las instancias
+posibles, en la misma máquina o en otra. Y SQL Server lo suelta al terminar la sesión, así que un
+proceso caído no lo deja tomado. La conexión va sin pool por lo mismo: con pool, cerrarla la
+devuelve con la sesión viva y el candado tomado por una conexión que nadie usa.
+
+**Por qué esperar y no salir:** una segunda instancia accidental queda inofensiva, y una puesta a
+propósito sirve de relevo. Salir obligaría a elegir entre un bucle de reinicios del servicio o un
+Worker caído hasta que alguien lo note.
+
+**Dónde:** una guardia registrada antes que los bucles. El host arranca los servicios de a uno y en
+orden, así que ninguno empieza hasta que ella tiene el candado; el arranque secuencial se fija
+explícitamente para no depender del valor por defecto. Si la activa pierde el candado —se cayó la
+conexión— detiene el proceso con código 1, para que el administrador de servicios la reinicie.
+
+**Lo que no resuelve:** entre que la conexión se cae y la activa lo nota hay una ventana —la
+verificación, más el lote en curso— en la que otra podría tomar el candado. Es mucho menor que el
+riesgo anterior, dos Workers procesando siempre, pero no es cero. Correr varias instancias a
+propósito sigue exigiendo la reserva por fila.
+
+**Interfaz local:** `ICandadoInstancia` vive en el Worker y existe para probar la guardia sin SQL
+Server; no es una frontera entre módulos. El candado real se prueba contra SQL Server con la
+variable `RRHH_PRUEBAS_SQL`, y esas pruebas se omiten si no está.
+
+### V25 — El arranque crea al primer analista de Sistemas, y solo a ese
+
+**Problema:** una base nueva no se podía poner en marcha. La migración no siembra analistas —son
+datos de cada empresa (V18)—, dar de alta uno exige ser Sistemas (V23), y `POST /sesion/arranque`
+solo fijaba la contraseña de un analista que ya existiera: el primero había que insertarlo a mano
+en SQL Server. Había además un bloqueo más silencioso: el arranque aceptaba cualquier rol. Si la
+primera contraseña iba a un analista común, la puerta se cerraba y nadie podía restablecer las de
+los demás, porque eso es solo de Sistemas.
+
+**Decisión:** el arranque es solo para Sistemas. Si no existe un analista con el correo pedido, lo
+da de alta con ese rol, pero solo si el correo coincide con `Arranque:EmailSistemas`, que se define
+por variable de entorno en el servidor. El correo se compara sin distinguir mayúsculas, como lo
+guarda el alta.
+
+**Por qué acotarlo al correo configurado:** el arranque es anónimo, y la Api es alcanzable desde
+internet porque recibe el webhook de Meta. Crear sin esa condición le daría visibilidad total a
+cualquiera que llegara primero a un despliegue recién publicado. Con ella, la exposición queda
+igual que en V20: hay que conocer un correo, y la puerta se cierra con la primera contraseña. El
+correo no es un secreto que haya que custodiar —V20 descartó sumar uno—: acota, no autentica.
+
+**Alternativas descartadas:** sembrarlo en una migración mete datos de una empresa en el código y
+deja un usuario conocido en todas las instalaciones. Un script que lo inserte en SQL se saltea las
+validaciones del alta de analistas —el correo normalizado, el rol—, que es lo que V18 quiso evitar.
+
+### V26 — Despliegue: dos sitios de IIS y el Worker como servicio
+
+**Dossier:** despliegue on-premise sobre IIS (D5), sin decir cómo.
+
+**Decisión:** la Api y la bandeja como **dos sitios separados**, y el Worker como **servicio de
+Windows**. Separarlos es lo que permite que el webhook de Meta entre por una URL pública con
+certificado y la bandeja quede solo en la red interna; además, reciclar un sitio no toca al otro.
+
+**Lo que el pool necesita, y no es el valor por defecto:** sin apagado por inactividad y sin
+reciclado por tiempo. Los dos matan el proceso, y con él los circuitos de Blazor y el canal en vivo
+(Sección 9.6.3): el analista vería su bandeja congelarse en medio de una conversación. Por eso
+`instalar-iis.ps1` los pone en cero en vez de dejar los 20 minutos y las 29 horas de siempre.
+
+**El servicio con recuperación ante fallas** es la otra mitad de V24: el Worker termina con código 1
+cuando pierde el candado, y sin recuperación quedaría detenido hasta que alguien lo notara — con las
+reglas por tiempo sin correr. Se activa además `failureflag`, porque por defecto Windows solo
+reacciona a caídas del proceso y no a una salida con código de error.
+
+**ContentRoot explícito en el Worker:** un servicio arranca en `System32`. Con el directorio actual
+no encontraría su `appsettings.json`, y el fallo aparecería como "no hay cadena de conexión", que no
+lleva a ninguna parte.
+
+**Los secretos van por variables de entorno de máquina**, no en los `appsettings.json` publicados:
+los leen los tres procesos por igual y no viajan en el paquete que se copia al servidor. Es lo mismo
+que ya pedía la Sección 9.6.1, llevado a la forma concreta del servidor.
+
+**Lo que los scripts no hacen a propósito:** el binding HTTPS con el certificado de la empresa. Es
+la URL que ve Meta y toca material sensible; armarla a ciegas desde un script esconde justo lo que
+conviene revisar a mano.
+
+### V27 — El token viaja donde diga la vacante, y el envío del formulario es idempotente
+
+**Problema 1:** el enlace se armaba agregando `?t=<token>`. Google Forms solo prellena parámetros
+con la forma `entry.<id>=`, distinta en cada formulario, así que ese token nunca llegaba a la
+respuesta: el webhook recibiría envíos que no puede atribuir a ninguna postulación. El circuito del
+JobForms no podía funcionar con Google Forms tal como estaba.
+
+**Decisión:** la URL de la vacante puede traer el marcador `{token}`, y el sistema lo reemplaza. Sin
+marcador se sigue agregando `?t=`, que es lo que va a leer el formulario propio cuando se migre a
+Razor Pages (D3). El nombre del parámetro no puede vivir en la configuración porque cambia con cada
+formulario: es un dato de la vacante, y ahí queda.
+
+**Problema 2:** el webhook no reconocía un envío repetido. El Apps Script reintenta cuando se pierde
+la respuesta —y perderla es normal en una red—, y cada reintento guardaba otra respuesta y volvía a
+publicar el evento: el postulante recibía la confirmación dos veces. Es el mismo patrón de mensajes
+duplicados que le costó la línea a la empresa.
+
+**Decisión:** si la invitación ya está completada y su respuesta existe, el envío no se procesa de
+nuevo y la Api contesta `yaRecibido`. El script lo trata como éxito. Se prefirió resolverlo en la
+Api antes que pedirle al script que no reintente: un reintento que falta deja al postulante sin
+postulación, y eso es peor que uno de más.
+
+**Lo que el script no hace:** decidir. Valida lo mínimo para no mandar basura —que haya token y
+DNI— y el resto lo resuelve la Api: vacante abierta (Regla 20), consentimiento (Regla 17) y a quién
+pertenece el envío. El día que el formulario se migre a Razor Pages, el script se tira y no cambia
+nada más.
+
 ## Riesgos abiertos
 
 | Riesgo | Detalle | Mitigación |
@@ -311,7 +515,7 @@ que hoy no existe. El claim `jti` ya está emitido para cuando haga falta.
 | **Webhook público** | 360dialog necesita una URL HTTPS con certificado válido. On-premise implica DNS, certificado y regla de firewall, con plazo propio. | Iniciarlo en paralelo al desarrollo, como la aprobación del WABA. |
 | **SQL Server Express** | 10 GB por base y sin SQL Agent. | Suficiente para el volumen actual; los CVs van fuera de la BD y el Worker reemplaza al Agent. Confirmar la instancia de producción. |
 | **Aprobación del WABA** | Es el cuello de botella real del proyecto, no el desarrollo. | Iniciar el trámite desde el día 1 (Sección 10 del dossier). |
-| **Worker de instancia única** | `EventosSistema` no tiene reserva por fila. Dos Workers tomarían el mismo evento y podrían enviar el mismo mensaje dos veces, que es el patrón que causó el bloqueo original. | Correr una sola instancia. Si el volumen la desborda, agregar reserva por fila antes de escalar, no después. |
+| **Worker de instancia única** | `EventosSistema` no tiene reserva por fila. Dos Workers tomarían el mismo evento y podrían enviar el mismo mensaje dos veces, que es el patrón que causó el bloqueo original. | Candado de SQL Server (V24): una segunda instancia queda en espera. Queda una ventana corta si la activa pierde la conexión. Si el volumen desborda a una instancia, agregar reserva por fila antes de escalar, no después. |
 | **La marca de "reingreso" no existe en el modelo** | Las Reglas 9 y 16 dicen "salvo marca de contratado / descartado / reingreso", pero `EstadoPostulacion` solo tiene `EnProceso`, `Contratado`, `Descartado` y `Archivada`. Hoy las reglas deciden con lo que existe: la 16 no archiva si hay algo en proceso o contratado, y la 9 no repregunta si el analista ya decidió. | Confirmar con RRHH qué significa reingreso en la práctica antes de agregar el estado; el mini-cuestionario de estado del postulante ya estaba pendiente de definición en la Sección 12 del dossier. |
 | **El CV vive en Google Drive** | Con Google Forms el adjunto queda en Drive y sólo guardamos su enlace. La purga de la Regla 17 limpia la referencia pero no puede borrar el archivo en el origen. | El Worker lo registra en el log cada vez que ocurre, para que quede el rastro del paso manual. Se resuelve solo al migrar el formulario a Razor Pages (D3), donde el CV entra por `IAlmacenamientoCv`. |
 

@@ -1,0 +1,109 @@
+@inject ClienteApi Api
+
+@* Regla 14: mientras dure, las conversaciones nuevas de sus cuentas van directo al respaldo, sin
+   esperar las 2 horas de la Regla 2. Se carga por dia y en hora de Lima, y los dos extremos cuentan:
+   del 1 al 15 cubre el 15 entero. *@
+<div class="subpanel">
+    @if (_ausencias.Count == 0)
+    {
+        <p class="detalle">Sin ausencias en curso ni programadas.</p>
+    }
+    else
+    {
+        <table class="tabla">
+            <thead>
+                <tr><th>Desde</th><th>Hasta</th><th>Motivo</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var ausencia in _ausencias)
+                {
+                    <tr @key="ausencia.AusenciaId">
+                        <td>@Dia(ausencia.FechaInicioUtc)</td>
+                        <td>@Dia(ausencia.FechaFinUtc)</td>
+                        <td>@ausencia.Motivo</td>
+                        <td><button class="btn btn-link" @onclick="() => Cancelar(ausencia)">cancelar</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <form class="fila-form" @onsubmit="Registrar" @onsubmit:preventDefault="true">
+        <label>Desde <input type="date" class="form-control" @bind="_desde" /></label>
+        <label>Hasta <input type="date" class="form-control" @bind="_hasta" /></label>
+        <label>Motivo <input class="form-control" @bind="_motivo" placeholder="Vacaciones, descanso médico…" /></label>
+        <button class="btn btn-primary" type="submit" disabled="@(_hasta < _desde)">Registrar ausencia</button>
+    </form>
+
+    @if (_mensaje is { } mensaje)
+    {
+        <p class="@(_esError ? "error" : "ok")">@mensaje</p>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int AnalistaId { get; set; }
+
+    private IReadOnlyList<AusenciaResumen> _ausencias = [];
+    private int? _cargadoPara;
+    private DateOnly _desde = HoraLima.Hoy;
+    private DateOnly _hasta = HoraLima.Hoy;
+    private string _motivo = string.Empty;
+    private string? _mensaje;
+    private bool _esError;
+
+    /// <summary>Solo cuando cambia el analista: la pagina que lo contiene se redibuja seguido.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_cargadoPara == AnalistaId)
+            return;
+
+        _cargadoPara = AnalistaId;
+
+        await CargarAsync();
+    }
+
+    private async Task CargarAsync() => _ausencias = await Api.AusenciasAsync(AnalistaId);
+
+    private async Task Registrar()
+    {
+        var respuesta = await Api.RegistrarAusenciaAsync(AnalistaId, new PeticionAusencia(
+            HoraLima.InicioDelDia(_desde),
+            HoraLima.FinDelDia(_hasta),
+            string.IsNullOrWhiteSpace(_motivo) ? null : _motivo.Trim()));
+
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        Informar($"Ausencia registrada del {_desde:dd/MM} al {_hasta:dd/MM}: en ese período las conversaciones nuevas van al respaldo.");
+        _motivo = string.Empty;
+
+        await CargarAsync();
+    }
+
+    private async Task Cancelar(AusenciaResumen ausencia)
+    {
+        var respuesta = await Api.CancelarAusenciaAsync(AnalistaId, ausencia.AusenciaId);
+
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        Informar("Ausencia cancelada.");
+
+        await CargarAsync();
+    }
+
+    private void Informar(string? mensaje, bool error = false)
+    {
+        _mensaje = mensaje ?? "No se pudo hacer.";
+        _esError = error;
+    }
+
+    private static string Dia(DateTime utc) => HoraLima.Desde(utc).ToString("dd/MM/yyyy");
+}

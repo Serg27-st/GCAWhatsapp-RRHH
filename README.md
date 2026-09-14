@@ -87,26 +87,28 @@ del kanban, los parámetros y las plantillas, pero **no las cuentas ni los anali
 de cada empresa. Sin al menos una cuenta con titular y una vacante abierta, el bot no tiene qué
 ofrecer y la Regla 1 no tiene a quién asignarle la conversación.
 
-Con la Api levantada:
+**1. El primer analista de Sistemas.** Una base nueva no tiene ninguno, y dar de alta analistas es
+de Sistemas (V23): alguien tiene que ser el primero. Antes de levantar la Api, definí qué correo lo
+va a ser:
 
 ```bash
-curl -X POST http://localhost:5087/cuentas -H "Content-Type: application/json" -d '{"nombre":"Alicorp"}'
+setx Arranque__EmailSistemas "sistemas@empresa.pe"
 ```
+
+Con la Api levantada, `POST /sesion/arranque` lo da de alta con rol Sistemas y le fija la
+contraseña (mínimo 10 caracteres). Hacelo apenas publicada: la puerta se cierra sola en cuanto
+existe la primera contraseña, y hasta entonces la puede usar cualquiera que conozca ese correo.
 
 ```bash
-curl -X POST http://localhost:5087/analistas -H "Content-Type: application/json" -d '{"nombre":"Ana Torres","email":"ana@empresa.pe","rol":"Analista"}'
+curl -X POST http://localhost:5087/sesion/arranque -H "Content-Type: application/json" -d '{"nombre":"Sistemas","email":"sistemas@empresa.pe","contrasena":"..."}'
 ```
 
-Después, el titular y el respaldo de la cuenta (Reglas 1 y 2), la vacante con su formulario
-(Regla 9) y el horario de atención (Regla 3):
+**2. El resto, desde la bandeja.** Entrá con ese usuario en <http://localhost:5090>:
 
-```bash
-curl -X POST http://localhost:5087/cuentas/1/analistas -H "Content-Type: application/json" -d '{"analistaId":1,"esBackup":false}'
-```
-
-```bash
-curl -X POST "http://localhost:5087/hc?analistaId=1" -H "Content-Type: application/json" -d '{"cuentaId":1,"titulo":"Operario de planta","urlJobForms":"https://forms.gle/..."}'
-```
+- **Equipo:** las cuentas, los analistas con su contraseña inicial, y el titular y el respaldo de
+  cada cuenta (Reglas 1 y 2).
+- **Vacantes:** al menos una vacante abierta por cuenta, con el enlace de su formulario (Regla 9).
+- **Configuración:** el horario de atención (Regla 3).
 
 `GET /cuentas` devuelve cada cuenta con su titular, su respaldo y sus vacantes abiertas: es la
 forma rápida de ver si falta algo. Una cuenta sin titular, o sin vacantes abiertas, no aparece en
@@ -144,7 +146,7 @@ el log del Worker como `[SIMULADO]`.
 | Reintento de envíos salientes | listo — por mensaje, solo lo transitorio, revalidando la Regla 15 |
 | Endpoints (Sección 9.4) | listo — bandeja, respuesta, transferencias, kanban, cuentas, analistas, HC, ausencias, plantillas, horario |
 | Contratos compartidos (`Contracts`) | listo — DTOs de bandeja y métricas, que es lo único que verá el Frontend |
-| Bandeja del analista (Blazor) | listo — lista por cuenta, chat, respuesta, acciones rápidas, kanban y métricas |
+| Bandeja del analista (Blazor) | listo — lista por cuenta, chat, respuesta, acciones rápidas, kanban, métricas y administración por rol |
 | Reporting (Regla 18) | listo — modelo de solo lectura propio y `GET /reportes/metricas` |
 | Autenticación de analistas (Sección 9.6.1) | listo — JWT propio, el analista sale del token |
 | Tiempo real por SignalR (Sección 9.6.3) | listo — hub por analista, alimentado desde la outbox |
@@ -193,14 +195,26 @@ La URL de la Api se configura en `Api:BaseUrl`.
 
 Lo que hay, contra la Sección 7 del dossier:
 
-| Pantalla | Cubre |
-|---|---|
-| `/bandeja` | lista por cuenta, buscador por DNI, chat, respuesta y acciones rápidas |
-| `/vacantes` | cuentas del analista y entrada al tablero |
-| `/tablero/{hcId}` | kanban por vacante, con columnas arrastrables (Regla 13) |
-| `/metricas` | panel de gerencia (Regla 18) |
+| Pantalla | Cubre | Quién la ve |
+|---|---|---|
+| `/bandeja` | lista por cuenta, buscador por DNI, chat, respuesta, acciones rápidas y transferencias recibidas | todos |
+| `/vacantes` | vacantes de cada cuenta: crear, cerrar, campos del formulario y entrada al tablero | titular y respaldo de la cuenta, y Sistemas |
+| `/tablero/{hcId}` | kanban por vacante, con columnas arrastrables (Regla 13) | titular y respaldo; Sistemas, sin mover tarjetas |
+| `/metricas` | panel de gerencia (Regla 18) | Jefatura y Sistemas |
+| `/equipo` | titular y respaldo de cada cuenta y ausencias de cualquiera; alta de cuentas y analistas y restablecer contraseñas, solo Sistemas | Jefatura y Sistemas |
+| `/configuracion` | horario de atención, parámetros de reglas y estado de las plantillas | Sistemas |
+| `/mi-cuenta` | cambiar la propia contraseña y las propias ausencias | todos |
 
-Tres cosas que la pantalla hace explícitas porque el analista necesita verlas:
+Las plantillas se ven pero no se activan desde la pantalla: se marcan activas en la base recién
+cuando Meta las aprueba (V8). Los parámetros se validan contra el tipo del valor actual y un número
+no admite cero, porque 0 días de retención purgaría todos los CVs en la próxima vuelta del Worker.
+
+Cuatro cosas que la pantalla hace explícitas porque el analista necesita verlas:
+
+- **Lo que le transfirieron** (Regla 8) va arriba de la lista, en cualquier pestaña, con aceptar y
+  rechazar. Se decide con la tarjeta —quién la manda, de qué cuenta, sobre quién y el comentario—
+  sin abrir el chat, que todavía no es suyo. Aceptar abre el hilo; la respuesta, sea cual sea, le
+  llega al origen por el canal en vivo, porque si la rechazaron el hilo sigue siendo suyo.
 
 - **La ventana de 24 horas.** Una conversación fuera de ventana se marca en la lista, y la caja de
   respuesta bloquea el texto libre y obliga a elegir plantilla. Quien decide es la Regla 15 en la
@@ -254,6 +268,35 @@ así que la Regla 4 era decorativa: cualquiera podía pedir la bandeja de cualqu
 número. **Ahora sale del token**, y lo mismo vale para el hub en vivo: el grupo se toma del claim,
 no de lo que pida el cliente.
 
+**Qué ve cada uno (Regla 4).** Tener sesión no alcanza: toda ruta `/conversaciones/{id}` pasa por un
+filtro que pregunta qué puede hacer ese analista con ese hilo.
+
+| Quién | Sobre qué | Puede |
+|---|---|---|
+| El analista que la atiende | su conversación | ver y actuar |
+| Cualquiera | lo que está sin clasificar (Regla 19) | ver y actuar |
+| Sistemas | todo | ver, no actuar: no responde en nombre de otro |
+| El resto | — | nada: la Api responde 404, como si no existiera |
+
+El mismo criterio, por cuenta, vale para el tablero y las tarjetas (titular y respaldo), para el
+buscador por DNI —que no cruza cuentas— y para el historial del postulante. Anonimizar a una
+persona (`DELETE /postulantes/{dni}`) queda para Sistemas, porque borra en todas las cuentas. El
+detalle, con sus criterios pendientes de confirmar, está en la decisión V22.
+
+**Quién administra (V23).** Hay tres roles: Analista, Jefatura y Sistemas.
+
+| Qué | Quién |
+|---|---|
+| Alta de cuentas y analistas, horario, parámetros de reglas | Sistemas |
+| Titular y respaldo de cada cuenta, ausencias de otros, panel de métricas | Jefatura y Sistemas |
+| Crear, cerrar y configurar vacantes | titular o respaldo de esa cuenta, y Sistemas |
+| La propia ausencia | cada analista |
+| Catálogos: analistas, cuentas, vacantes abiertas, plantillas, etapas, horario | todos, solo lectura |
+
+Jefatura no ve conversaciones ajenas ni recibe transferencias: mira el panel y decide la
+cobertura. Una prueba recorre todos los controladores y falla si aparece una escritura sin dueño
+declarado.
+
 | Ruta | Para qué |
 |---|---|
 | `POST /sesion/login` | Devuelve el token y su vencimiento |
@@ -264,12 +307,11 @@ no de lo que pida el cliente.
 
 **La primera vez.** Tras el despliegue ningún analista tiene contraseña, así que nadie puede
 entrar. `POST /sesion/arranque` fija la primera y **se cierra sola en cuanto existe** — de ahí en
-adelante devuelve 409 y las contraseñas se manejan por restablecimiento. Conviene hacerlo apenas
-publicado, con el analista de rol Sistemas:
-
-```bash
-curl -X POST https://.../sesion/arranque -H "Content-Type: application/json" -d '{"email":"sistemas@empresa.pe","contrasena":"..."}'
-```
+adelante devuelve 409 y las contraseñas se manejan por restablecimiento. Es **solo para Sistemas**:
+es el único rol que después puede restablecer las de los demás, así que una primera contraseña de
+otro rol dejaría a todos afuera. En una base nueva, si el correo coincide con
+`Arranque__EmailSistemas`, además da de alta al analista (V25). Los pasos están en *Dejar la
+operación en condiciones de funcionar*.
 
 **Detalles que importan.** Las contraseñas se guardan con PBKDF2-SHA256, sal por usuario y 210.000
 iteraciones: la lentitud es la defensa. El login responde lo mismo ante usuario inexistente,
@@ -449,6 +491,55 @@ Mientras el formulario viva en Google Forms, el CV queda en Drive y `cvUrl` es s
 de la Regla 17 limpia entonces la referencia pero **no puede borrar el archivo en el origen**: eso
 queda como paso manual hasta migrar a Razor Pages, y el Worker lo registra en el log cuando ocurre.
 
+### El Apps Script del formulario
+
+Mientras el JobForms viva en Google Forms, lo que conecta el formulario con el sistema es un script
+de Google: `scripts/apps-script/Codigo.gs`. Se instala una vez por formulario.
+
+**1. La pregunta del token.** Agregá al formulario una pregunta de respuesta corta llamada `token`.
+Es lo que identifica de qué postulación es cada envío; sin ella el webhook no puede atribuirlo a
+nadie.
+
+**2. El enlace de la vacante.** En el formulario, ⋮ → *Obtener vínculo prellenado*: escribí
+cualquier cosa en `token`, copiá el enlace y reemplazá ese valor por `{token}`. Queda así:
+
+```
+https://docs.google.com/forms/d/e/FORM_ID/viewform?usp=pp_url&entry.123456789={token}
+```
+
+Ese es el enlace que se carga en la vacante, desde la pantalla **Vacantes**. El bot reemplaza
+`{token}` por el token de cada postulante. **Sin el marcador no funciona con Google**: el sistema
+agregaría `?t=…`, que Google ignora, y el token nunca llegaría a la respuesta (V27).
+
+**3. El script.** Extensiones → Apps Script, pegar `Codigo.gs`, y en *Configuración del proyecto →
+Propiedades del script*:
+
+| Propiedad | Valor |
+|---|---|
+| `URL_WEBHOOK` | `https://…/jobforms/webhook-google` |
+| `SECRETO` | el mismo valor de `JobForms__SecretoWebhook` |
+
+**4. El disparador.** Disparadores → *Agregar disparador*: función `alEnviarFormulario`, evento *Al
+enviarse el formulario*. Tiene que ser instalable, porque el envío sale a la red.
+
+**5. Comprobarlo.** Ejecutá `probarConfiguracion()` una vez: manda un token inexistente y espera que
+la Api lo rechace por eso. Si dice *URL y secreto OK*, quedó bien; un 401 es el secreto mal copiado.
+
+**Reintentos.** El script reintenta tres veces ante fallas pasajeras, y no reintenta un rechazo del
+negocio, que daría siempre lo mismo. Repetir un envío es seguro: la Api reconoce el que ya recibió,
+responde `yaRecibido` y no guarda otra respuesta ni le vuelve a escribir al postulante (V27).
+
+**Sin Google.** `scripts/probar-jobforms-local.ps1` manda el mismo cuerpo que el script, con el
+token de una invitación real:
+
+```powershell
+.\scripts\probar-jobforms-local.ps1 -Token 6f1e6d0c2b5f4a1e8f0d9c3b7a2e5d41 -Dni 45678912
+```
+
+**Los adjuntos quedan en Drive**, no en el recurso compartido: lo que viaja es el enlace. Hay que
+darles acceso a los analistas, y la purga de la Regla 17 puede limpiar la referencia pero no el
+archivo. Se resuelve al migrar el formulario a Razor Pages (D3).
+
 ### SQL Express y AUTO_CLOSE
 
 SQL Server Express crea las bases con `AUTO_CLOSE` activado. Con esa opción la base se apaga cuando
@@ -515,7 +606,7 @@ tardar el próximo; la Api solo compara.
 | Ruta | Qué mira | Para quién |
 |---|---|---|
 | `GET /health/vivo` | solo que el proceso responde | IIS, para decidir si reciclar el sitio |
-| `GET /health` | SQL Server + los tres bucles del Worker | el monitoreo |
+| `GET /health` | SQL Server, los bucles del Worker y qué instancia tiene el candado | el monitoreo |
 
 `/health` devuelve **503 con el detalle de qué bucle se detuvo y hace cuánto**, más lo que hizo en
 su último ciclo:
@@ -564,12 +655,38 @@ se abandona con el motivo escrito, no se fuerza el envío.
 Los parámetros con los que se armó una plantilla se guardan en el mensaje: el contenido almacenado
 conserva los `{{n}}` sin reemplazar, así que sin ellos el reintento no podría reconstruirla.
 
-### El Worker es una sola instancia
+### Un solo Worker procesa
 
 `EventosSistema` no tiene reserva por fila, así que dos Workers leyendo la cola tomarían el mismo
 evento y podrían enviar dos veces el mismo mensaje de WhatsApp — justo lo que el proyecto existe
-para evitar. Debe correr una única instancia; si alguna vez hace falta más de una, primero hay que
-agregar la reserva. Su cadencia se ajusta en la sección `Worker` de `appsettings.json`.
+para evitar. Ya pasó que quedaran dos corriendo sin que nadie lo notara.
+
+Por eso el Worker toma un **candado en SQL Server** (`sp_getapplock`) antes de arrancar sus bucles:
+
+- **El primero lo toma y trabaja.** Un segundo Worker —en la misma máquina o en otra— lo encuentra
+  tomado, lo dice en el log y **queda en espera sin tocar la cola**.
+- **Si el activo muere, el de reserva toma el relevo** en hasta `EsperaCandadoSegundos` (15 por
+  defecto). SQL Server suelta el candado solo al cerrarse la sesión, así que un proceso caído no lo
+  deja tomado.
+- **Si el activo pierde la conexión con la base, se detiene** con código de salida 1: sin conexión
+  ya no tiene el candado, y otro podría tomarlo. Como servicio de Windows, conviene configurar el
+  reinicio ante fallas para que vuelva y espere su turno.
+
+`GET /health` muestra en `InstanciaActiva` qué máquina y qué proceso tiene el candado.
+
+**Lo que no cubre:** entre que la conexión se cae y el activo lo nota pasan hasta
+`VerificacionCandadoSegundos` (5 por defecto), más lo que tarde el lote en curso. Si en esa ventana
+otro toma el candado, pueden solaparse. Para correr varias instancias a propósito sigue haciendo
+falta la reserva por fila. La cadencia se ajusta en la sección `Worker` de `appsettings.json`.
+
+Las pruebas contra SQL Server real —el candado, y el cambio de titular contra el índice único— se
+omiten si no se indica cuál. No dejan filas: el candado usa nombres propios, y la otra corre dentro
+de una transacción que se deshace.
+
+```powershell
+$env:RRHH_PRUEBAS_SQL = "Server=.\SQLEXPRESS;Database=RRHH_WhatsApp;Trusted_Connection=True;TrustServerCertificate=True"
+dotnet test --filter "FullyQualifiedName~SqlServer"
+```
 
 Para levantarlo en desarrollo, con la Api corriendo aparte:
 
@@ -577,12 +694,75 @@ Para levantarlo en desarrollo, con la Api corriendo aparte:
 dotnet run --project src/RRHH.WhatsApp.Worker
 ```
 
+## Despliegue en IIS
+
+Tres procesos: la **Api** y la **bandeja** como sitios de IIS, el **Worker** como servicio de
+Windows. Los tres salen de `scripts/publicar.ps1`, que deja una carpeta por proceso.
+
+**En el servidor, una sola vez:**
+
+- **.NET Hosting Bundle**, de la misma versión mayor que el proyecto. Es lo que instala el módulo de
+  ASP.NET Core en IIS; sin él, el sitio responde 500.19 y no arranca de ninguna forma.
+- **WebSocket Protocol** habilitado en IIS. Por ahí van Blazor Server y el canal en vivo de la
+  Sección 9.6.3.
+- Una **cuenta de servicio** de dominio para el pool de IIS y para el Worker, con permisos en SQL
+  Server y en la carpeta de CVs.
+
+```powershell
+.\scripts\publicar.ps1 -Destino D:\Publicado\RRHH
+```
+
+```powershell
+.\scripts\instalar-iis.ps1 -RutaApi D:\Publicado\RRHH\api -RutaBandeja D:\Publicado\RRHH\bandeja -Cuenta 'DOMINIO\svc_rrhh'
+```
+
+```powershell
+.\scripts\instalar-servicio-worker.ps1 -RutaPublicada D:\Publicado\RRHH\worker -Cuenta 'DOMINIO\svc_rrhh'
+```
+
+Los dos instaladores exigen administrador y se pueden volver a correr: actualizan lo que ya existe en
+vez de duplicarlo, que es lo que hace falta en cada nueva versión.
+
+**Los secretos no se publican.** Van como variables de entorno **de máquina** (`setx /M`), que es lo
+que leen los tres procesos:
+
+| Variable | Para qué |
+|---|---|
+| `ConnectionStrings__RrhhWhatsApp` | La base. La misma para los tres procesos |
+| `Jwt__Clave` | Firma de los tokens, mínimo 32 caracteres. Sin ella la Api no arranca |
+| `Arranque__EmailSistemas` | Correo del primer analista de Sistemas (V25) |
+| `MetaCloud__*` o `Dialog360__*` | Credenciales del proveedor de WhatsApp |
+| `JobForms__SecretoWebhook` | Lo que autentica al Apps Script de Google |
+| `Cv__Carpeta` | Ruta UNC del recurso compartido de CVs |
+| `ASPNETCORE_ENVIRONMENT` | `Production` |
+
+Se leen al arrancar: después de cambiarlas hay que reciclar el pool y reiniciar el servicio.
+
+**Lo que el script deja configurado, y por qué.** El pool va sin CLR administrado —.NET Core no corre
+en ese pipeline—, **sin apagado por inactividad y sin reciclado por tiempo**: cualquiera de los dos
+cortaría los circuitos de Blazor y el canal en vivo en medio de una conversación. El servicio del
+Worker queda con reinicio ante fallas, y con `failureflag` prendido para que la recuperación valga
+también cuando el proceso termina con código distinto de cero — que es justo como el Worker avisa que
+perdió el candado (V24).
+
+**Lo que queda a mano:** el binding HTTPS con el certificado de la empresa sobre el sitio de la Api
+—es la URL que ve Meta—, y `Api:BaseUrl` en el `appsettings.json` de la bandeja apuntando al sitio de
+la Api.
+
+**Para comprobar que quedó bien:** `GET /health` en verde —base y bucles del Worker—, y entrar a la
+bandeja. `GET /health/vivo` es el que conviene dejarle a IIS como prueba de estado: no mira la base,
+así que una caída de SQL Server no lo hace reciclar el sitio en bucle.
+
 ## Antes de salir a producción
 
 - [ ] WABA verificado y aprobado por Meta
 - [ ] Las 6 plantillas de `Plantillas` registradas y aprobadas en Meta, y marcadas `Activa = true`
 - [ ] URL pública HTTPS con certificado válido para el webhook
 - [ ] Cadena de conexión y credenciales de 360dialog fuera del código
+- [ ] .NET Hosting Bundle instalado en el servidor y WebSocket Protocol habilitado en IIS
+- [ ] Sitios creados con `scripts/instalar-iis.ps1` y Worker instalado con `scripts/instalar-servicio-worker.ps1`, con la cuenta de servicio
+- [ ] Variables de entorno de máquina definidas (tabla de *Despliegue en IIS*), con `ASPNETCORE_ENVIRONMENT=Production`
+- [ ] `Api:BaseUrl` de la bandeja apuntando al sitio de la Api, y binding HTTPS con certificado sobre el sitio de la Api
 - [ ] Cuentas, analistas, respaldos por cuenta y horario de atención cargados (`GET /cuentas` los muestra)
 - [ ] `AUTO_CLOSE` desactivado en la base de producción (lo hace la migración `DesactivarAutoClose`)
 - [ ] Aviso de privacidad revisado por Legal y su versión registrada en `ConfiguracionReglas`
@@ -591,7 +771,8 @@ dotnet run --project src/RRHH.WhatsApp.Worker
 - [ ] Windows Defender activo en el servidor (`Get-MpComputerStatus`), o `Cv:Antivirus:ExigirEscaneo` bajado a conciencia
 - [ ] Plazo de retención de CVs (`datos.retencion_cv_dias`) confirmado con Legal
 - [ ] `Jwt__Clave` desplegada como variable de entorno (mínimo 32 caracteres) — sin ella la Api no arranca
-- [ ] `POST /sesion/arranque` ejecutado apenas publicado, para fijar la contraseña del analista Sistemas
+- [ ] `Arranque__EmailSistemas` definido y `POST /sesion/arranque` ejecutado apenas publicado: en una base nueva crea el analista de Sistemas y le fija la contraseña
+- [ ] Quien mira el panel de métricas dado de alta con `"rol":"Jefatura"`, y su contraseña restablecida por Sistemas
 - [ ] Monitor externo consultando `GET /health` y avisando cuando devuelva 503 (Sección 9.6.2)
 - [ ] `scripts/respaldo.ps1` programado en el Programador de tareas, con permiso de escritura para la cuenta del servicio de SQL Server
 - [ ] `scripts/verificar-respaldo.ps1` programado como chequeo periódico de consistencia

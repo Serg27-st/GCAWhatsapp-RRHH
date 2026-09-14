@@ -1,3 +1,6 @@
+@implements IDisposable
+@inject SesionAnalista Sesion
+
 <div class="nav-lateral">
     <div class="marca">
         <span class="logo">RRHH</span>
@@ -7,6 +10,35 @@
     <nav>
         <NavLink href="/bandeja" Match="NavLinkMatch.All">Bandeja</NavLink>
         <NavLink href="/vacantes">Vacantes</NavLink>
-        <NavLink href="/metricas">Métricas</NavLink>
+
+        @* Lo que cada rol puede ver y administrar (V23). La Api lo exige igual; ocultarlo solo
+           evita ofrecer una pantalla que va a responder que no. *@
+        @if (Sesion.VeMetricas)
+        {
+            <NavLink href="/metricas">Métricas</NavLink>
+        }
+
+        @if (Sesion.PuedeAdministrarEquipo)
+        {
+            <NavLink href="/equipo">Equipo</NavLink>
+        }
+
+        @if (Sesion.EsSistemas)
+        {
+            <NavLink href="/configuracion">Configuración</NavLink>
+        }
+
+        @if (Sesion.Activa)
+        {
+            <NavLink href="/mi-cuenta">Mi cuenta</NavLink>
+        }
     </nav>
 </div>
+
+@code {
+    protected override void OnInitialized() => Sesion.Cambio += AlCambiarSesion;
+
+    private void AlCambiarSesion() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Sesion.Cambio -= AlCambiarSesion;
+}

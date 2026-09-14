@@ -110,5 +110,135 @@ public class TransferenciaTests : IDisposable
         Assert.Equal(EntornoDeReglas.TitularId, conversacion.AnalistaAtendiendoId);
     }
 
+    private Task<int> AvisosParaAsync(int analistaId) =>
+        _entorno.Db.EventosSistema.CountAsync(
+            e => e.Tipo == TiposEvento.AnalistaNotificado
+              && e.Payload.Contains($"\"AnalistaId\":{analistaId}"));
+
+    private Task<Domain.Entidades.Transferencia> TransferirNormalAsync(int conversacionId, string? comentario = null) =>
+        _entorno.Conversaciones.TransferirAsync(
+            conversacionId, EntornoDeReglas.TitularId, EntornoDeReglas.RespaldoId, urgente: false, comentario);
+
+    [Fact]
+    public async Task El_destino_ve_la_transferencia_con_quien_la_envia()
+    {
+        var id = await ConversacionAsignadaAsync();
+
+        await TransferirNormalAsync(id, "Encaja mejor en tu vacante.");
+
+        var pendiente = Assert.Single(
+            await _entorno.Conversaciones.ListarTransferenciasPendientesAsync(EntornoDeReglas.RespaldoId));
+
+        Assert.Equal(id, pendiente.ConversacionId);
+        Assert.Equal("Ana Torres", pendiente.AnalistaOrigen?.Nombre);
+        Assert.Equal("Encaja mejor en tu vacante.", pendiente.Comentario);
+    }
+
+    [Fact]
+    public async Task Quien_la_envia_no_la_ve_como_pendiente_suya()
+    {
+        var id = await ConversacionAsignadaAsync();
+
+        await TransferirNormalAsync(id);
+
+        Assert.Empty(await _entorno.Conversaciones.ListarTransferenciasPendientesAsync(EntornoDeReglas.TitularId));
+    }
+
+    [Fact]
+    public async Task Una_urgente_no_queda_esperando_respuesta()
+    {
+        var id = await ConversacionAsignadaAsync();
+
+        await _entorno.Conversaciones.TransferirAsync(
+            id, EntornoDeReglas.TitularId, EntornoDeReglas.RespaldoId, urgente: true, null);
+
+        Assert.Empty(await _entorno.Conversaciones.ListarTransferenciasPendientesAsync(EntornoDeReglas.RespaldoId));
+    }
+
+    [Fact]
+    public async Task Responderla_la_saca_de_la_lista()
+    {
+        var id = await ConversacionAsignadaAsync();
+        var transferencia = await TransferirNormalAsync(id);
+
+        await _entorno.Conversaciones.ResponderTransferenciaAsync(
+            transferencia.TransferenciaId, EntornoDeReglas.RespaldoId, aceptada: true);
+
+        Assert.Empty(await _entorno.Conversaciones.ListarTransferenciasPendientesAsync(EntornoDeReglas.RespaldoId));
+    }
+
+    /// <summary>
+    /// Rechazar deja el hilo con el origen, y es el origen quien tiene que derivarlo a otro. Sin
+    /// este aviso no sabria que le toca.
+    /// </summary>
+    [Fact]
+    public async Task Rechazarla_avisa_al_origen()
+    {
+        var id = await ConversacionAsignadaAsync();
+        var transferencia = await TransferirNormalAsync(id);
+        var antes = await AvisosParaAsync(EntornoDeReglas.TitularId);
+
+        await _entorno.Conversaciones.ResponderTransferenciaAsync(
+            transferencia.TransferenciaId, EntornoDeReglas.RespaldoId, aceptada: false);
+
+        Assert.Equal(antes + 1, await AvisosParaAsync(EntornoDeReglas.TitularId));
+    }
+
+    [Fact]
+    public async Task Aceptarla_tambien_avisa_al_origen()
+    {
+        var id = await ConversacionAsignadaAsync();
+        var transferencia = await TransferirNormalAsync(id);
+        var antes = await AvisosParaAsync(EntornoDeReglas.TitularId);
+
+        await _entorno.Conversaciones.ResponderTransferenciaAsync(
+            transferencia.TransferenciaId, EntornoDeReglas.RespaldoId, aceptada: true);
+
+        Assert.Equal(antes + 1, await AvisosParaAsync(EntornoDeReglas.TitularId));
+    }
+
+    [Fact]
+    public async Task Solo_el_destino_puede_responderla()
+    {
+        var id = await ConversacionAsignadaAsync();
+        var transferencia = await TransferirNormalAsync(id);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _entorno.Conversaciones.ResponderTransferenciaAsync(
+                transferencia.TransferenciaId, EntornoDeReglas.TitularId, aceptada: true));
+    }
+
+    [Fact]
+    public async Task No_se_responde_dos_veces()
+    {
+        var id = await ConversacionAsignadaAsync();
+        var transferencia = await TransferirNormalAsync(id);
+
+        await _entorno.Conversaciones.ResponderTransferenciaAsync(
+            transferencia.TransferenciaId, EntornoDeReglas.RespaldoId, aceptada: true);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _entorno.Conversaciones.ResponderTransferenciaAsync(
+                transferencia.TransferenciaId, EntornoDeReglas.RespaldoId, aceptada: false));
+    }
+
+    /// <summary>V23: Jefatura y Sistemas no atienden, asi que tampoco reciben conversaciones.</summary>
+    [Fact]
+    public async Task No_se_transfiere_a_quien_no_atiende_conversaciones()
+    {
+        var id = await ConversacionAsignadaAsync();
+
+        _entorno.Db.Analistas.Add(new Domain.Entidades.Analista
+        {
+            AnalistaId = 20, Nombre = "Jefa del area", Email = "jefa@gca.pe",
+            Activo = true, Rol = RolAnalista.Jefatura
+        });
+
+        await _entorno.Db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _entorno.Conversaciones.TransferirAsync(id, EntornoDeReglas.TitularId, 20, urgente: true, null));
+    }
+
     public void Dispose() => _entorno.Dispose();
 }

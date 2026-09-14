@@ -30,6 +30,13 @@ public sealed class ConfiguracionReglasService(RrhhDbContext db, IMemoryCache ca
         return valores;
     }
 
+    /// <summary>Para la pantalla de configuracion. Sin cache: se pide rara vez y tiene que mostrar lo ultimo.</summary>
+    public async Task<IReadOnlyList<ConfiguracionRegla>> ListarAsync(CancellationToken ct = default) =>
+        await db.ConfiguracionReglas
+            .AsNoTracking()
+            .OrderBy(c => c.Clave)
+            .ToListAsync(ct);
+
     public async Task EstablecerAsync(string clave, string valor, CancellationToken ct = default)
     {
         var existente = await db.ConfiguracionReglas.FirstOrDefaultAsync(c => c.Clave == clave, ct);

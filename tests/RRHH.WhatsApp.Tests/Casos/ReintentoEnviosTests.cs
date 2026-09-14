@@ -249,6 +249,9 @@ public class ReintentoEnviosTests : IDisposable
         public async Task<IReadOnlyDictionary<string, string>> ObtenerTodasAsync(CancellationToken ct = default) =>
             await db.ConfiguracionReglas.AsNoTracking().ToDictionaryAsync(c => c.Clave, c => c.Valor, ct);
 
+        public async Task<IReadOnlyList<ConfiguracionRegla>> ListarAsync(CancellationToken ct = default) =>
+            await db.ConfiguracionReglas.AsNoTracking().ToListAsync(ct);
+
         public Task EstablecerAsync(string clave, string valor, CancellationToken ct = default) =>
             Task.CompletedTask;
     }

@@ -37,7 +37,13 @@ public static class ServiciosVigilados
     public const string PurgaCv = "PurgaCv";
     public const string ReintentoEnvios = "ReintentoEnvios";
 
-    /// <summary>Los bucles del Worker. Si falta alguno, el health lo reporta como detenido.</summary>
+    /// <summary>
+    /// La guardia que tiene el candado del Worker (V24). Su detalle dice que maquina y que proceso
+    /// es la instancia activa: con dos Workers en juego, es lo primero que hay que saber.
+    /// </summary>
+    public const string InstanciaActiva = "InstanciaActiva";
+
+    /// <summary>Lo que el health vigila del Worker. Si falta alguno, lo reporta como detenido.</summary>
     public static readonly IReadOnlyList<string> Todos =
-        [ConsumidorOutbox, BarridoTiempo, PurgaCv, ReintentoEnvios];
+        [ConsumidorOutbox, BarridoTiempo, PurgaCv, ReintentoEnvios, InstanciaActiva];
 }

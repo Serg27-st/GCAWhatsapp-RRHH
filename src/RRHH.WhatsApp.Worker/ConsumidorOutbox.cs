@@ -10,10 +10,11 @@ namespace RRHH.WhatsApp.Worker;
 /// atender y los procesa de a uno. Es la otra mitad del gateway — el webhook encola y responde 200
 /// en milisegundos, y el trabajo de reglas ocurre aca.
 /// <para>
-/// Asume una sola instancia del Worker. La tabla de eventos no tiene reserva ni bloqueo por fila,
-/// asi que dos procesos leyendo la misma cola tomarian el mismo evento y podrian enviar dos veces
-/// el mismo mensaje de WhatsApp, que es justo el patron que este proyecto existe para evitar. Si
-/// alguna vez hace falta mas de una instancia, primero hay que agregar la reserva.
+/// Asume una sola instancia del Worker, y la <see cref="GuardiaInstancia"/> la garantiza: este bucle
+/// no arranca hasta que el proceso tiene el candado (V24). La tabla de eventos no tiene reserva ni
+/// bloqueo por fila, asi que dos procesos leyendo la misma cola tomarian el mismo evento y podrian
+/// enviar dos veces el mismo mensaje de WhatsApp. Si alguna vez hace falta mas de una instancia
+/// activa, primero hay que agregar la reserva.
 /// </para>
 /// </summary>
 public sealed class ConsumidorOutbox(

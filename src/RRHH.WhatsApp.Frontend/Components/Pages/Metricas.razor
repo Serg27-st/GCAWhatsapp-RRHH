@@ -1,24 +1,34 @@
 @page "/metricas"
 @rendermode InteractiveServer
 @inject ClienteApi Api
+@inject SesionAnalista Sesion
 
 <PageTitle>Métricas</PageTitle>
 
-@* Regla 18: el panel de gerencia. *@
+@* Regla 18: el panel de gerencia. Es de Jefatura y Sistemas (V23). *@
 <div class="metricas">
     <header>
         <h1>Panel de gerencia</h1>
 
-        <div class="periodo">
-            <input type="date" class="form-control" @bind="_desde" />
-            <input type="date" class="form-control" @bind="_hasta" />
-            <button class="btn btn-primary" @onclick="Cargar">Actualizar</button>
-        </div>
+        @if (Sesion.VeMetricas)
+        {
+            <div class="periodo">
+                <input type="date" class="form-control" @bind="_desde" />
+                <input type="date" class="form-control" @bind="_hasta" />
+                <button class="btn btn-primary" @onclick="Cargar">Actualizar</button>
+            </div>
+        }
     </header>
 
-    @if (_metricas is null)
+    @if (!Sesion.VeMetricas)
     {
-        <p class="vacio">Cargando…</p>
+        <p class="vacio">El panel de gerencia es para Jefatura y Sistemas.</p>
+    }
+    else if (_metricas is null)
+    {
+        @* Nulo despues de cargar es un rechazo o una Api caida: sin distinguirlo, la pantalla
+           diria "Cargando" para siempre. *@
+        <p class="vacio">@(_cargado ? "No se pudieron cargar las métricas." : "Cargando…")</p>
     }
     else
     {
@@ -105,13 +115,22 @@
     private MetricasGerencia? _metricas;
     private DateTime _desde = DateTime.UtcNow.AddDays(-30).Date;
     private DateTime _hasta = DateTime.UtcNow.Date.AddDays(1);
+    private bool _cargado;
 
     protected override Task OnInitializedAsync() => Cargar();
 
-    private async Task Cargar() =>
+    private async Task Cargar()
+    {
+        // Sin el rol ni se pregunta: la Api respondería 403 y la pantalla no tendría nada que agregar.
+        if (!Sesion.VeMetricas)
+            return;
+
         _metricas = await Api.MetricasAsync(
             DateTime.SpecifyKind(_desde, DateTimeKind.Utc),
             DateTime.SpecifyKind(_hasta, DateTimeKind.Utc));
+
+        _cargado = true;
+    }
 
     /// <summary>Minutos crudos no se leen bien pasada la hora; se muestran como horas y minutos.</summary>
     private static string Duracion(double? minutos) => minutos switch

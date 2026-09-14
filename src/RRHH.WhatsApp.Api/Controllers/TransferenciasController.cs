@@ -31,9 +31,9 @@ public sealed class TransferenciasController(
             t.TransferenciaId,
             t.ConversacionId,
             t.AnalistaOrigen?.Nombre ?? $"Analista {t.AnalistaOrigenId}",
+            t.Conversacion?.CuentaContexto?.Nombre,
             t.Conversacion?.Postulante?.NombreCompleto,
             t.Conversacion?.TelefonoE164,
-            t.Urgente,
             t.Comentario,
             t.Fecha)));
     }

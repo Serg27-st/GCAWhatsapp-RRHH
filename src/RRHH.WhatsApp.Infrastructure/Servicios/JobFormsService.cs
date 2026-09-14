@@ -120,4 +120,15 @@ public sealed class JobFormsService(
 
         await db.SaveChangesAsync(ct);
     }
+
+    /// <summary>
+    /// La respuesta ya guardada de esa invitacion. Nula si todavia no llego ninguna: es lo que
+    /// distingue un envio nuevo de un reintento (V27).
+    /// </summary>
+    public Task<JobFormsRespuesta?> ObtenerRespuestaDeInvitacionAsync(
+        int invitacionId, CancellationToken ct = default) =>
+        db.JobFormsRespuestas
+            .AsNoTracking()
+            .OrderByDescending(r => r.RespuestaId)
+            .FirstOrDefaultAsync(r => r.InvitacionId == invitacionId, ct);
 }

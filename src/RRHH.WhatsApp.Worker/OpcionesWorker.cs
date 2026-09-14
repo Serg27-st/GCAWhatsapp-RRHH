@@ -39,4 +39,17 @@ public sealed class OpcionesWorker
 
     /// <summary>Pausa tras fallar el lote completo, para no golpear un recurso que ya esta caido.</summary>
     public int PausaTrasErrorSegundos { get; set; } = 30;
+
+    /// <summary>
+    /// Cada cuanto reintenta tomar el candado una instancia en espera (V24). Es lo que tarda la de
+    /// reserva en tomar el relevo cuando la activa muere.
+    /// </summary>
+    public int EsperaCandadoSegundos { get; set; } = 15;
+
+    /// <summary>
+    /// Cada cuanto la instancia activa comprueba que el candado sigue siendo suyo. Es la ventana en
+    /// que, tras perder la conexion, podria seguir procesando sin saberlo: conviene que sea menor que
+    /// <see cref="EsperaCandadoSegundos"/>, para que la activa se entere antes de que otra lo tome.
+    /// </summary>
+    public int VerificacionCandadoSegundos { get; set; } = 5;
 }

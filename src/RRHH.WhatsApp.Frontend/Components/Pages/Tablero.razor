@@ -19,7 +19,14 @@
 
     @if (_tablero is null)
     {
-        <p class="vacio">Cargando el tablero…</p>
+        @* Nulo despues de cargar es un rechazo de la Api: la vacante no existe, no es de las cuentas
+           de quien la pide (Regla 4), o la Api no respondio. Sin distinguirlo, la pantalla diria
+           "Cargando" para siempre. *@
+        <p class="vacio">
+            @(_cargado
+                ? "No se pudo abrir este tablero: no existe, no es de tus cuentas o la Api no respondió."
+                : "Cargando el tablero…")
+        </p>
     }
     else
     {
@@ -60,12 +67,14 @@
     private PostulacionResumen? _arrastrada;
     private int? _destino;
     private string? _error;
+    private bool _cargado;
 
     protected override Task OnParametersSetAsync() => Cargar();
 
     private async Task Cargar()
     {
         _tablero = await Api.TableroAsync(HcId);
+        _cargado = true;
         _destino = null;
     }
 
@@ -92,11 +101,8 @@
 
         _error = null;
 
-        // La ruta cuelga de la conversacion, pero lo que se mueve es la postulacion: el hilo es
-        // por telefono y el kanban por vacante (desviacion V1 de docs/decisiones.md).
-        var respuesta = await Api.MoverEtapaAsync(
-            tarjeta.PostulacionId,
-            new PeticionMoverEtapa(tarjeta.PostulacionId, etapaId));
+        // Lo que se mueve es la postulacion, y va por su propia ruta (V22 de docs/decisiones.md).
+        var respuesta = await Api.MoverEtapaAsync(tarjeta.PostulacionId, new PeticionMoverEtapa(etapaId));
 
         if (!respuesta.Exito)
             _error = respuesta.Motivo;
