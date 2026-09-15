@@ -638,9 +638,14 @@ y nada volvía a intentarlo. El reintento corre en el Worker y se apoya en clasi
 
 | Clase | Cuándo | Qué hace |
 |---|---|---|
-| **Transitorio** | 5xx, 429, fallo de conexión | Reintenta con retroceso exponencial (1m, 2m, 4m), hasta agotar `envio.reintentos_maximos` |
+| **Transitorio** | 5xx, 429, fallo de conexión (DNS, TCP o TLS: la petición nunca salió) | Reintenta con retroceso exponencial (1m, 2m, 4m), hasta agotar `envio.reintentos_maximos` |
 | **Permanente** | 401, 403, 400, plantilla sin aprobar | No reintenta: daría el mismo resultado y solo gasta cuota |
-| **Ambiguo** | Se perdió la respuesta (timeout) | **Nunca reintenta solo.** La Cloud API no admite clave de idempotencia, así que el mensaje pudo haber salido y reenviarlo lo duplicaría |
+| **Ambiguo** | Se perdió la respuesta (timeout, u otra falla de red después de que la petición ya viajó) | **Nunca reintenta solo.** La Cloud API no admite clave de idempotencia, así que el mensaje pudo haber salido y reenviarlo lo duplicaría |
+
+Los adaptadores (`MetaCloudProvider`, `Dialog360Provider`) no llevan capa de resiliencia HTTP
+propia: no hay `AddStandardResilienceHandler()` ni reintento implícito en el `HttpClient`. Esa capa
+reintentaba POSTs por su cuenta, saltaba el `LimitadorEnvio` y se sumaba a lo de acá — el patrón que
+costó la línea (C4/ARQ-04, decisión V29). El único reintento del sistema es este.
 
 Dos decisiones que sostienen que esto sea seguro:
 

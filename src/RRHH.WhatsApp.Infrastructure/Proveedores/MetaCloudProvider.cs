@@ -150,12 +150,32 @@ public sealed class MetaCloudProvider(
 
             return ResultadoEnvio.Ambiguo($"Sin respuesta de Meta dentro del tiempo limite: {ex.Message}");
         }
-        catch (HttpRequestException ex)
+        catch (HttpRequestException ex) when (ClasificadorFallosHttp.NuncaLlegoASalir(ex))
         {
-            // Fallo de conexion: la peticion nunca llego a procesarse, asi que reintentar es seguro.
+            // Fallo de conexion (DNS, TCP o TLS): la peticion nunca llego a procesarse, asi que
+            // reintentar es seguro. Es el unico caso Transitorio de una excepcion (ARQ-04/C4).
             log.LogError(ex, "No se pudo conectar con la Cloud API de Meta.");
 
             return ResultadoEnvio.Transitorio(ex.Message);
+        }
+        catch (HttpRequestException ex)
+        {
+            // Cualquier otro HttpRequestException (la conexion se corto a mitad de respuesta, el
+            // protocolo vino roto) pudo pasar despues de que la peticion ya viajo a Meta. No se
+            // sabe si la proceso, asi que no se reintenta solo (V29): ReintentoEnvios solo toma los
+            // Transitorios, y un Ambiguo lo resuelve una persona.
+            log.LogError(ex, "Fallo la peticion a la Cloud API de Meta despues de enviarla. El envio queda como ambiguo.");
+
+            return ResultadoEnvio.Ambiguo(ex.Message);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // Sin AddStandardResilienceHandler() (ARQ-04/C4), nada atraviesa el adaptador sin
+            // clasificar: cualquier otra excepcion —serializacion, IO— pudo ocurrir con la
+            // peticion ya en vuelo, asi que se trata igual que un HttpRequestException tardio.
+            log.LogError(ex, "Fallo inesperado enviando a la Cloud API de Meta. El envio queda como ambiguo.");
+
+            return ResultadoEnvio.Ambiguo(ex.Message);
         }
     }
 

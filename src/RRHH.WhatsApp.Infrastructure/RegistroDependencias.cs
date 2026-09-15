@@ -130,14 +130,17 @@ public static class RegistroDependencias
         {
             servicios.AddSingleton(new LimitadorEnvio(meta.MaximoPorSegundo));
 
+            // Sin handler de resiliencia (ARQ-04/C4, V29): reintentar un POST por su cuenta anula
+            // "Ambiguo no se reintenta solo", esquiva el LimitadorEnvio y se suma a los reintentos
+            // de ReintentoEnvios. El unico reintento del sistema es ese; el adaptador clasifica la
+            // excepcion y no reintenta nada.
             servicios.AddHttpClient<IWhatsAppProvider, MetaCloudProvider>(cliente =>
             {
                 cliente.BaseAddress = new Uri("https://graph.facebook.com/");
                 cliente.Timeout = TimeSpan.FromSeconds(meta.TimeoutSegundos);
                 cliente.DefaultRequestHeaders.Authorization =
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", meta.AccessToken);
-            })
-            .AddStandardResilienceHandler();
+            });
 
             return servicios;
         }
@@ -155,13 +158,13 @@ public static class RegistroDependencias
             return servicios;
         }
 
+        // Misma razon que en el cliente de Meta: sin handler de resiliencia (ARQ-04/C4, V29).
         servicios.AddHttpClient<IWhatsAppProvider, Dialog360Provider>(cliente =>
         {
             cliente.BaseAddress = new Uri(dialog.BaseUrl.TrimEnd('/') + "/");
             cliente.Timeout = TimeSpan.FromSeconds(dialog.TimeoutSegundos);
             cliente.DefaultRequestHeaders.Add("D360-API-KEY", dialog.ApiKey);
-        })
-        .AddStandardResilienceHandler();
+        });
 
         return servicios;
     }

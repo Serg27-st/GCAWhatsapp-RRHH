@@ -151,11 +151,26 @@ public sealed class Dialog360Provider(
             log.LogError(ex, "Se perdio la respuesta de 360dialog. El envio queda como ambiguo.");
             return ResultadoEnvio.Ambiguo($"Sin respuesta dentro del tiempo limite: {ex.Message}");
         }
-        catch (HttpRequestException ex)
+        catch (HttpRequestException ex) when (ClasificadorFallosHttp.NuncaLlegoASalir(ex))
         {
-            // Fallo de conexion: la peticion nunca llego, asi que reintentar es seguro.
+            // Fallo de conexion (DNS, TCP o TLS): la peticion nunca llego, asi que reintentar es
+            // seguro. Es el unico caso Transitorio de una excepcion (ARQ-04/C4).
             log.LogError(ex, "No se pudo conectar con 360dialog.");
             return ResultadoEnvio.Transitorio(ex.Message);
+        }
+        catch (HttpRequestException ex)
+        {
+            // Cualquier otro HttpRequestException pudo pasar con la peticion ya en vuelo: no se
+            // sabe si 360dialog la proceso, asi que no se reintenta solo (V29).
+            log.LogError(ex, "Fallo la peticion a 360dialog despues de enviarla. El envio queda como ambiguo.");
+            return ResultadoEnvio.Ambiguo(ex.Message);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // Sin AddStandardResilienceHandler() (ARQ-04/C4), nada atraviesa el adaptador sin
+            // clasificar: cualquier otra excepcion pudo ocurrir con la peticion ya en vuelo.
+            log.LogError(ex, "Fallo inesperado enviando a 360dialog. El envio queda como ambiguo.");
+            return ResultadoEnvio.Ambiguo(ex.Message);
         }
     }
 
