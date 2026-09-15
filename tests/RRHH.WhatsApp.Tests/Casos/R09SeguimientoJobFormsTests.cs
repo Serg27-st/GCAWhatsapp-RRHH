@@ -28,7 +28,7 @@ public class R09SeguimientoJobFormsTests : IDisposable
         var guardada = await _entorno.Db.JobFormsInvitaciones
             .FirstAsync(i => i.InvitacionId == invitacion.InvitacionId);
 
-        guardada.FechaEnvioLink = DateTime.UtcNow - antiguedad;
+        guardada.FechaEnvioLink = _entorno.Ahora - antiguedad;
 
         await _entorno.Db.SaveChangesAsync();
 

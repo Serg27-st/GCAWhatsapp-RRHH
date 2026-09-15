@@ -46,7 +46,7 @@ public class RetencionDatosTests : IDisposable
         var respuesta = await _entorno.Db.JobFormsRespuestas
             .FirstAsync(r => r.RespuestaId == resultado.RespuestaId);
 
-        respuesta.FechaEnvio = DateTime.UtcNow.AddDays(-diasDeAntiguedad);
+        respuesta.FechaEnvio = _entorno.Ahora.AddDays(-diasDeAntiguedad);
 
         await _entorno.Db.SaveChangesAsync();
 

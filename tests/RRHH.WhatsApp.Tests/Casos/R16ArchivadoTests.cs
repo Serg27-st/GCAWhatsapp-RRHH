@@ -27,7 +27,7 @@ public class R16ArchivadoTests : IDisposable
     {
         var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == conversacionId);
 
-        var momento = DateTime.UtcNow - atraso;
+        var momento = _entorno.Ahora - atraso;
 
         conversacion.FechaUltimaActividad = momento;
         conversacion.FechaUltimoMensajeEntrante = momento;
@@ -38,7 +38,7 @@ public class R16ArchivadoTests : IDisposable
     /// <summary>Le da al hilo un postulante con una postulacion en el estado indicado.</summary>
     private async Task ConPostulacionAsync(int conversacionId, EstadoPostulacion estado)
     {
-        var postulante = new Postulante { Dni = "45678912", FechaRegistro = DateTime.UtcNow };
+        var postulante = new Postulante { Dni = "45678912", FechaRegistro = _entorno.Ahora };
         _entorno.Db.Postulantes.Add(postulante);
         await _entorno.Db.SaveChangesAsync();
 
@@ -49,8 +49,8 @@ public class R16ArchivadoTests : IDisposable
             CuentaId = EntornoDeReglas.CuentaId,
             EtapaKanbanId = 1,
             Estado = estado,
-            FechaCreacion = DateTime.UtcNow,
-            FechaUltimaActividad = DateTime.UtcNow
+            FechaCreacion = _entorno.Ahora,
+            FechaUltimaActividad = _entorno.Ahora
         });
 
         var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == conversacionId);

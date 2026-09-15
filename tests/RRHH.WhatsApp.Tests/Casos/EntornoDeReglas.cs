@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using RRHH.WhatsApp.Application.Casos;
 using RRHH.WhatsApp.Application.Reglas;
 using RRHH.WhatsApp.Application.Reglas.Implementaciones;
@@ -44,6 +45,21 @@ internal sealed class EntornoDeReglas : IDisposable
     public ICuentaService Cuentas { get; }
     public string CarpetaCv { get; }
 
+    /// <summary>
+    /// Lunes 14 de setiembre de 2026, 10:00 en Lima (15:00 UTC). Dentro del horario laboral a
+    /// proposito: una prueba que no va sobre la Regla 3 no deberia depender de a que hora se corre.
+    /// </summary>
+    public static readonly DateTimeOffset InicioReloj = new(2026, 9, 14, 15, 0, 0, TimeSpan.Zero);
+
+    /// <summary>
+    /// El reloj de todo el circuito (ARQ-01, ARQ-12). Lo mueve la prueba con <see cref="AvanzarAsync"/>:
+    /// las reglas por tiempo —R2, R9, R16— se prueban avanzando horas en vez de reescribir fechas.
+    /// </summary>
+    public FakeTimeProvider Reloj { get; } = new(InicioReloj);
+
+    /// <summary>Instante actual del reloj simulado, en UTC como lo guarda la base.</summary>
+    public DateTime Ahora => Reloj.GetUtcNow().UtcDateTime;
+
     public EntornoDeReglas()
     {
         var opciones = new DbContextOptionsBuilder<RrhhDbContext>()
@@ -55,9 +71,7 @@ internal sealed class EntornoDeReglas : IDisposable
 
         Sembrar();
 
-        // T0.10 reemplazara TimeProvider.System por un FakeTimeProvider expuesto como Reloj; por
-        // ahora cada servicio recibe el reloj real, igual que en produccion.
-        var reloj = TimeProvider.System;
+        var reloj = Reloj;
 
         Proveedor = new ProveedorSimulado(reloj, NullLogger<ProveedorSimulado>.Instance);
 
@@ -159,7 +173,7 @@ internal sealed class EntornoDeReglas : IDisposable
             Titulo = "Operario de produccion",
             UrlJobForms = "https://forms.gle/operario",
             Estado = EstadoHc.Abierta,
-            FechaCreacion = DateTime.UtcNow
+            FechaCreacion = Ahora
         });
 
         Db.SaveChanges();
@@ -179,7 +193,7 @@ internal sealed class EntornoDeReglas : IDisposable
     {
         await Recepcion.ProcesarAsync(payload, new Dictionary<string, string>());
 
-        var ahora = DateTime.UtcNow;
+        var ahora = Ahora;
 
         foreach (var conversacion in await Db.Conversaciones.ToListAsync())
         {
@@ -217,10 +231,20 @@ internal sealed class EntornoDeReglas : IDisposable
     {
         var conversacion = await Db.Conversaciones.FirstAsync(c => c.ConversacionId == conversacionId);
 
-        conversacion.FechaUltimaActividad = DateTime.UtcNow;
-        conversacion.FechaUltimoMensajeEntrante = DateTime.UtcNow;
+        conversacion.FechaUltimaActividad = Ahora;
+        conversacion.FechaUltimoMensajeEntrante = Ahora;
 
         await Db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Avanza el reloj de todo el circuito. Es asincrono porque el arnes de escenarios (T1.02) lo
+    /// va a encadenar con los demas pasos de una conversacion.
+    /// </summary>
+    public Task AvanzarAsync(TimeSpan lapso)
+    {
+        Reloj.Advance(lapso);
+        return Task.CompletedTask;
     }
     public void Dispose()
     {

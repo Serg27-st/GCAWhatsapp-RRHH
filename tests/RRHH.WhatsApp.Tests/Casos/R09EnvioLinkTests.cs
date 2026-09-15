@@ -69,7 +69,7 @@ public class R09EnvioLinkTests : IDisposable
             Titulo = "Almacenero",
             Estado = EstadoHc.Abierta,
             UrlJobForms = "https://forms.gle/almacenero",
-            FechaCreacion = DateTime.UtcNow
+            FechaCreacion = _entorno.Ahora
         });
 
         await _entorno.Db.SaveChangesAsync();

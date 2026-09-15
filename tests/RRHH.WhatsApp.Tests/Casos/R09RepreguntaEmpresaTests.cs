@@ -35,7 +35,7 @@ public class R09RepreguntaEmpresaTests : IDisposable
 
         Assert.Equal(2, mensajes.Count);
 
-        var ahora = DateTime.UtcNow;
+        var ahora = _entorno.Ahora;
 
         mensajes[0].FechaEnvio = ahora - hueco;
         mensajes[1].FechaEnvio = ahora;
@@ -82,7 +82,7 @@ public class R09RepreguntaEmpresaTests : IDisposable
         // contradice la decision que el analista acaba de tomar.
         var id = await ConHuecoDeAsync(TimeSpan.FromDays(10));
 
-        var postulante = new Postulante { Dni = "45678912", FechaRegistro = DateTime.UtcNow };
+        var postulante = new Postulante { Dni = "45678912", FechaRegistro = _entorno.Ahora };
         _entorno.Db.Postulantes.Add(postulante);
         await _entorno.Db.SaveChangesAsync();
 
@@ -93,8 +93,8 @@ public class R09RepreguntaEmpresaTests : IDisposable
             CuentaId = EntornoDeReglas.CuentaId,
             EtapaKanbanId = 4,
             Estado = EstadoPostulacion.Contratado,
-            FechaCreacion = DateTime.UtcNow,
-            FechaUltimaActividad = DateTime.UtcNow
+            FechaCreacion = _entorno.Ahora,
+            FechaUltimaActividad = _entorno.Ahora
         });
 
         var hilo = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == id);

@@ -90,7 +90,7 @@ public class ProcesadorOutboxTests : IDisposable
             Tipo = TiposEvento.MensajeEntranteRecibido,
             Payload = """{"telefonoE164":"+51987654321"}""",
             CorrelationId = Guid.NewGuid(),
-            FechaCreacion = DateTime.UtcNow
+            FechaCreacion = _entorno.Ahora
         };
 
         await Assert.ThrowsAsync<InvalidOperationException>(

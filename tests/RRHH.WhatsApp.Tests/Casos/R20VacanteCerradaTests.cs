@@ -33,7 +33,7 @@ public class R20VacanteCerradaTests : IDisposable
         var vacante = await _entorno.Db.Hcs.FirstAsync(h => h.HcId == hcId);
 
         vacante.Estado = EstadoHc.Cerrada;
-        vacante.FechaCierre = DateTime.UtcNow;
+        vacante.FechaCierre = _entorno.Ahora;
 
         await _entorno.Db.SaveChangesAsync();
     }
@@ -53,7 +53,7 @@ public class R20VacanteCerradaTests : IDisposable
             Titulo = "Envasador",
             Estado = EstadoHc.Abierta,
             UrlJobForms = "https://forms.gle/envasador",
-            FechaCreacion = DateTime.UtcNow
+            FechaCreacion = _entorno.Ahora
         });
 
         await _entorno.Db.SaveChangesAsync();
@@ -93,7 +93,7 @@ public class R20VacanteCerradaTests : IDisposable
             CuentaId = EntornoDeReglas.CuentaId,
             Titulo = "Vacante vieja",
             Estado = EstadoHc.Cerrada,
-            FechaCreacion = DateTime.UtcNow
+            FechaCreacion = _entorno.Ahora
         });
 
         await _entorno.Db.SaveChangesAsync();

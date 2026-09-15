@@ -31,7 +31,7 @@ public class BarridoTiempoTests : IDisposable
     {
         var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == conversacionId);
 
-        var momento = DateTime.UtcNow - atraso;
+        var momento = _entorno.Ahora - atraso;
 
         conversacion.FechaUltimoMensajeEntrante = momento;
         conversacion.FechaUltimaActividad = momento;
@@ -81,7 +81,7 @@ public class BarridoTiempoTests : IDisposable
 
         // Es lo que detiene el reloj de la Regla 2. Sin esta marca, el barrido escalaria
         // conversaciones que ya fueron atendidas.
-        await _entorno.Conversaciones.RegistrarRespuestaAnalistaAsync(id, DateTime.UtcNow);
+        await _entorno.Conversaciones.RegistrarRespuestaAnalistaAsync(id, _entorno.Ahora);
 
         var acciones = await _entorno.Barrido.ProcesarConversacionAsync(id);
 
@@ -102,7 +102,7 @@ public class BarridoTiempoTests : IDisposable
         var pendientes = await _entorno.Conversaciones.ListarPendientesEscalamientoAsync(50);
         Assert.Contains(id, pendientes);
 
-        await _entorno.Conversaciones.RegistrarRespuestaAnalistaAsync(id, DateTime.UtcNow);
+        await _entorno.Conversaciones.RegistrarRespuestaAnalistaAsync(id, _entorno.Ahora);
 
         var trasResponder = await _entorno.Conversaciones.ListarPendientesEscalamientoAsync(50);
         Assert.DoesNotContain(id, trasResponder);

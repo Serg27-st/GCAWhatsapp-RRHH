@@ -28,7 +28,7 @@ public class EnvioAnalistaTests : IDisposable
     {
         var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == conversacionId);
 
-        conversacion.FechaUltimoMensajeEntrante = DateTime.UtcNow.AddHours(-30);
+        conversacion.FechaUltimoMensajeEntrante = _entorno.Ahora.AddHours(-30);
 
         await _entorno.Db.SaveChangesAsync();
     }
