@@ -1521,8 +1521,8 @@ dotnet ef migrations add NombreDelCambio --project src/RRHH.WhatsApp.Infrastruct
 
 | ✔ | Tarea | Depende de | Notas |
 |---|---|---|---|
-| [ ] | T0.01 Línea base | — | |
-| [ ] | T0.02 Decisiones V28–V36 y D7; puntero en CLAUDE.md | T0.01 | |
+| [x] | T0.01 Línea base | — | 2026-09-14 · `d579e29` · Build 0/0, pruebas 349 ok / 4 omitidas. **Desvío:** commit directo en `master`, sin rama `auditoria/linea-base` |
+| [x] | T0.02 Decisiones V28–V36 y D7; puntero en CLAUDE.md | T0.01 | 2026-09-14 · Ratificadas todas sin objeciones. Se agregó también la fila D6 (JWT, citada en V20 y ausente de la tabla) y referencias cruzadas en V8, V14, V20 y V22. Solo documentación |
 | [ ] | T0.03 Proveedores sin reintentos implícitos | T0.01 | |
 | [ ] | T0.04 Limitador con parámetro | T0.01 | |
 | [ ] | T0.05 Plantillas inactivas por defecto | T0.01 | |
@@ -1537,12 +1537,12 @@ dotnet ef migrations add NombreDelCambio --project src/RRHH.WhatsApp.Infrastruct
 | [ ] | T1.04 JobForms atómico | T1.01 | |
 | [ ] | T1.05 Cola de envíos: dominio | T1.01 | |
 | [ ] | T1.06 Cola de envíos: migración `ColaDeEnvios` | T1.05 | |
-| [ ] | T1.07 Cola de envíos: servicio | T1.06 | |
+| [ ] | T1.07 Cola de envíos: servicio | T1.06 | **Pendiente (V29):** la Api también escribe en la cola; `TomarLoteEnColaAsync` no debe poder tomar la fila de una respuesta del analista (ver T1.11) |
 | [ ] | T1.08 Validador y despacho | T1.07, T0.03 | |
 | [ ] | T1.09 Worker de despacho | T1.08 | |
-| [ ] | T1.10 El ejecutor encola | T1.09 | |
-| [ ] | T1.11 Respuesta del analista idempotente | T1.10 | |
-| [ ] | T1.12 Consumidor transaccional y motor estricto (E16) | T1.10 | |
+| [ ] | T1.10 El ejecutor encola | T1.09 | **Pendiente:** la clave del barrido difiere entre la especificación de 03 (ARQ-03: `barrido:{ConversacionId}:{regla}:{marca}`) y la de 04 (`barrido:{id}:{yyyyMMddHHmm}`); también `{EventoId}:{i}` frente a `evt:`. Manda la especificación de 03 salvo decisión en contra |
+| [ ] | T1.11 Respuesta del analista idempotente | T1.10 | **Ajuste (V29):** la fila del analista nace directamente `Enviando`, no `EnCola`, para que el despachador no la tome entre ambos pasos. Alternativa: `UPDATE` condicionado al estado en los dos caminos |
+| [ ] | T1.12 Consumidor transaccional y motor estricto (E16) | T1.10 | Corregir también el comentario de `MotorReglas.cs:34-35`, que hoy ya es falso (el evento se marca procesado, no queda para reintento) |
 | [ ] | T1.13 Alertas: modelo, migración `AlertasOperativas` | T1.01 | |
 | [ ] | T1.14 Alertas en lugar de eventos huérfanos | T1.13, T1.10 | |
 | [ ] | T2.01 CalendarioLaboral | T0.02 | |
@@ -1590,12 +1590,12 @@ dotnet ef migrations add NombreDelCambio --project src/RRHH.WhatsApp.Infrastruct
 | [ ] | T5.01 Estado de entrega (E22) | T1.07 | |
 | [ ] | T5.02 Adjuntos: modelo e intérprete | T1.03 | |
 | [ ] | T5.03 Adjuntos: descarga del proveedor | T5.02 | |
-| [ ] | T5.04 Adjuntos: almacenamiento y Worker | T5.03 | |
+| [ ] | T5.04 Adjuntos: almacenamiento y Worker | T5.03 | **Pendiente (V33):** fijar desde cuándo cuenta `datos.retencion_adjuntos_dias`; V33 recomienda seguir A5 (última actividad del postulante), no la fecha de recepción |
 | [ ] | T5.05 Adjuntos: bandeja y purga (E23) | T5.04 | |
 | [ ] | T5.06 Purga de outbox | T2.12 | |
 | [ ] | T5.07 Anonimización extendida (E20) | T5.06, T5.05, T1.01 | |
 | [ ] | T5.08 Panel de alertas | T1.14 | |
-| [ ] | T5.09 Versión de seguridad | T0.02 | |
+| [ ] | T5.09 Versión de seguridad | T0.02 | ARQ-11 en 03 depende de FUN-19 (T5.11); aquí solo de T0.02. Revisar el orden al llegar |
 | [ ] | T5.10 Cerrar sesiones | T5.09 | |
 | [ ] | T5.11 Baja y edición de analistas (E21) | T5.09, T1.13 | |
 | [ ] | T5.12 Edición de cuentas y vacantes | T3.08, T1.13 | |

@@ -12,6 +12,8 @@ La fuente de requisitos sigue siendo `Dossier_Maestro_WhatsApp_RRHH_v2.docx`.
 | D3 | JobForms | **Google Forms primero**, migrar a Razor Pages después | Reglas 17 y 20 quedan parcialmente manuales (ver Riesgos) |
 | D4 | Modelo de datos | **Agregar tabla `Postulaciones`** | El kanban pasa a ser por vacante, no por cuenta |
 | D5 | Despliegue | **On-premise** (IIS + SQL Server de la empresa) | CVs en recurso compartido, secretos en variables de entorno |
+| D6 | Autenticación | **JWT emitido por el propio sistema**, sin Active Directory / SSO | `IAutenticacionService` queda como costura para integrar un directorio el día que exista (ver V20) |
+| D7 | Criterio de atención | **Resoluciones A1–A15 con criterio de atención preferente al postulante** (principios P1–P4) | Prevalecen sobre las dudas originales. Detalle en [`auditoria/01-arquitectura-funcional.md`](auditoria/01-arquitectura-funcional.md) §5; se reflejan en V30, V33 y V36 |
 
 ## Desviaciones respecto del dossier
 
@@ -82,6 +84,8 @@ tiene dependencias y lo referencian solo `Api` y `Frontend`, así que la regla s
 una debe registrarse y aprobarse en Meta antes de activarse. Es deliberado: el objetivo del
 proyecto es dejar de recibir bloqueos, y un envío con una plantilla no aprobada es exactamente lo
 que los provoca.
+
+**Revisada por V36** (texto libre del bot dentro de la ventana; las plantillas siguen naciendo inactivas).
 
 ### V9 — La outbox se consume filtrando por tipo de evento
 
@@ -177,6 +181,8 @@ distingue el rechazo que se resuelve eligiendo una plantilla del que no tiene sa
 **Efecto secundario que importa:** es también el único lugar que marca
 `FechaUltimaRespuestaAnalista`, que es lo que detiene el reloj del escalamiento de la Regla 2.
 Hasta que existió este camino, nada la escribía.
+
+**Ajustada por V29** (sigue sincrónica, pero registra la fila antes de llamar al proveedor, con clave de idempotencia).
 
 ### V15 — Reporting lee las tablas transaccionales, sin copia alimentada por eventos
 
@@ -301,6 +307,8 @@ administración, que sería una credencial más que custodiar.
 refresh agrega una credencial de larga vida que hay que poder revocar, y revocar necesita estado
 que hoy no existe. El claim `jti` ya está emitido para cuando haga falta.
 
+**Completada por V34** (revocación por versión de seguridad del analista, sin estado de sesión).
+
 ### V21 — La transferencia se responde desde la bandeja, sin abrir el chat
 
 **Problema:** la Regla 8 tenía el endpoint para aceptar o rechazar, pero ninguna pantalla lo usaba
@@ -361,6 +369,8 @@ conversación, y ningún control podía validar el objeto correcto.
 **Lo que no cubre:** la administración —cuentas, analistas, vacantes, horario, parámetros— y el
 panel de métricas quedaban abiertos a cualquier analista con sesión. Es otra pregunta (quién
 administra, no quién ve) y la resuelve V23.
+
+**Revisada por V30** (en «Sin clasificar» todos ven, pero para actuar hay que tomar el hilo; `EnMenuBot` no aparece en ninguna bandeja).
 
 ### V23 — Rol Jefatura, y quién administra qué
 
@@ -505,6 +515,243 @@ DNI— y el resto lo resuelve la Api: vacante abierta (Regla 20), consentimiento
 pertenece el envío. El día que el formulario se migre a Razor Pages, el script se tira y no cambia
 nada más.
 
+### V28 — Cada caso de uso confirma o deshace entero
+
+**Problema:** cada servicio de dominio hace su propio `SaveChanges`, así que un caso de uso que falla
+a mitad deja escrita la primera parte. En la ingesta eso pierde mensajes (hallazgo C6): el mensaje
+queda guardado, la publicación del evento falla, Meta reentrega, el duplicado se descarta y el evento
+nunca existe. En el JobForms la invitación queda completada sin evento, y el reintento del Apps
+Script recibe `yaRecibido` (V27): nadie confirma, asigna ni avisa. En la outbox (C5) el evento vuelve
+a `Pendiente` con la mitad de sus acciones ya aplicadas.
+
+**Decisión:** `IUnidadTrabajo` en Domain, implementada en Infrastructure sobre el `RrhhDbContext` del
+ámbito. Abre una transacción si no hay una abierta y, ante una excepción, deshace y limpia el
+rastreador de cambios. Los servicios siguen llamando a `SaveChanges`: dentro de la transacción
+ambiental se confirman juntos. La usan la ingesta por mensaje, el caso completo del JobForms, el
+consumidor de la outbox (V35) y las acciones de bandeja que tocan varias filas —tomar, marcar, mover
+etapa, reasignar cartera—. Especificación en `auditoria/03-analisis-brechas.md` §ARQ-02.
+
+**Alternativa descartada:** quitar los `SaveChanges` de los servicios y confirmar una sola vez al
+final. Obliga a reescribirlos todos y rompe los que necesitan la clave generada antes de terminar,
+como el `MensajeId` que viaja en el evento.
+
+**Consecuencia:** V6 se sostiene —no aparece un repositorio—, y la frontera transaccional queda
+explícita por caso de uso en vez de repartida entre servicios. `UseSqlServer` no tiene reintento de
+ejecución; si algún día se activa, la transacción manual tiene que ir dentro de la estrategia de
+ejecución. EF InMemory ignora las transacciones, así que la garantía se prueba contra SQL Server
+(`RRHH_PRUEBAS_SQL`).
+
+**Lo que no resuelve:** un WhatsApp entregado no se deshace con un rollback. Eso es V29.
+
+### V29 — El bot decide dentro de la transacción y un despachador envía
+
+**Problema:** `EjecutorAcciones` llama al proveedor en medio del procesamiento del evento. Un envío no
+es transaccional, así que V28 sola no alcanza: si algo falla después de enviar, el rollback devuelve
+el evento y el reintento vuelve a mandar menús, enlaces y confirmaciones (C5). A eso se sumaban los
+reintentos HTTP implícitos del handler de resiliencia (C4), que reenvían un POST que Meta ya aceptó y
+esquivan el limitador (AL8). Es el patrón de mensajes duplicados que costó la línea.
+
+**Decisión:** separar decidir de enviar.
+
+- Procesar un evento solo escribe. Cada envío decidido se registra como `Mensaje` saliente `EnCola`
+  con una `ClaveIdempotencia` única, en la misma transacción que las demás acciones y que la marca de
+  procesado. Si el evento se reprocesa, el índice único rechaza la fila y el mensaje no se duplica.
+- Un despachador del Worker toma los `EnCola`, revalida la Regla 15 al momento de enviar —la ventana
+  pudo cerrarse mientras esperaba, o la plantilla desactivarse—, respeta el limitador y marca el
+  resultado con su clase de fallo.
+- Un `Enviando` que supera el tiempo de espera es un envío cuyo resultado se perdió: pasa a
+  `Fallido`/`Ambiguo` y no se reintenta solo.
+- **El único reintento del sistema es `ReintentoEnvios`**, que ya clasifica y respeta la Regla 15 y
+  el limitador. Los adaptadores no reintentan por HTTP (ARQ-04) y ninguna excepción del proveedor sale
+  de ellos.
+
+**Ajusta V14:** la respuesta del analista sigue sincrónica —el motivo de V14, que el analista se
+entere en el acto de un bloqueo de la Regla 15, sigue en pie—, pero registra la fila antes de llamar
+al proveedor, con una clave de idempotencia que genera la bandeja al redactar. Un doble clic, o un
+reintento del Frontend tras perder la respuesta, devuelve el mensaje existente en vez de mandar otro.
+
+**Condición que la implementación debe cumplir:** el despachador nunca toma la fila de una respuesta
+del analista. La Api y el Worker escriben en la misma cola, y V24 garantiza un solo Worker, no un
+solo emisor: si la fila de la bandeja se confirma `EnCola` y recién después pasa a `Enviando`, el
+despachador puede tomarla en ese intervalo y el mensaje sale dos veces. Lo más simple es que la fila
+del analista nazca directamente `Enviando`; la alternativa es que el paso `EnCola → Enviando` sea un
+`UPDATE` condicionado al estado en los dos caminos.
+
+**Consecuencia:** entre decidir y enviar pasa hasta un ciclo del despachador, a cambio de que ningún
+fallo posterior produzca un segundo mensaje (P4). El despachador suma un latido propio al health
+(V19). Especificación en `auditoria/03-analisis-brechas.md` §ARQ-03.
+
+### V30 — El bot tiene su propio estado, y «Sin clasificar» se toma antes de actuar
+
+**Problema:** `PendienteClasificar` mezclaba tres hilos distintos: el que el bot está atendiendo, el
+que el bot no entendió y el que perdió su contexto. «Sin clasificar» se llenaba de conversaciones que
+el bot todavía estaba resolviendo. Y aunque V22 daba acceso total a cualquier analista, no existía
+una acción para hacerse cargo (AL1): responder no asignaba analista ni cuenta, varios podían
+escribirle al mismo postulante a la vez —lo que la Regla 11 prohíbe— y la Regla 2 no lo vigilaba,
+porque el barrido solo mira `Activa`. Justo los postulantes que el bot no entendió quedaban sin dueño
+ni plazo, contra P3.
+
+**Decisión:**
+
+- Estado nuevo `EnMenuBot`, inicial de toda conversación. Pasa a `Activa` cuando la cuenta queda
+  identificada y asignada (Reglas 1 y 14), y a `PendienteClasificar` solo cuando el bot se rinde:
+  reintentos del menú agotados (Regla 19) o silencio tras un texto no reconocido (A12). El conteo de
+  intentos deja de derivarse del historial (AL2) y pasa a un contador en la conversación.
+- `EnMenuBot` no aparece en ninguna bandeja. Solo Sistemas lo ve, en lectura, para soporte.
+- **Revisa V22:** en «Sin clasificar» todos los analistas ven, pero para actuar hay que **tomar** el
+  hilo eligiendo una cuenta que trabajen (FUN-01). Tomar fija cuenta y analista y pasa a `Activa`; si
+  dos toman a la vez, el segundo recibe 409. Responder, transferir o marcar sin haber tomado se
+  rechaza. Es el mínimo para que haya un solo interlocutor (Regla 11) y para que el hilo entre al
+  reloj de la Regla 2. A7 (D7) lo confirma: visible y tomable por todos.
+- Una conversación archivada que vuelve a recibir mensajes sale de `Archivada` —a `Activa` si tiene
+  un proceso vivo o `Reingreso`, a `EnMenuBot` si no—, en vez de quedar invisible (AL10, A14).
+- `EstadoConversacion.Cerrada` queda **reservado sin uso**: nada cierra una conversación (B3), pero el
+  valor se conserva porque la columna es entera y pudo persistirse.
+
+**Consecuencia:** la matriz de acceso de V22 cambia solo en esos dos estados; quien atiende y
+Sistemas siguen igual. Una migración de datos pasa a `EnMenuBot` las `PendienteClasificar` que el bot
+nunca derivó. Especificación en `auditoria/03-analisis-brechas.md` §ARQ-05 y §FUN-01.
+
+### V31 — El calendario laboral es código puro en Domain
+
+**Problema:** el cálculo de horas hábiles vive en `HorarioAtencionService`, en Infrastructure, y cada
+vez más piezas lo necesitan: la próxima apertura para el aviso fuera de horario (C1, A8), el segundo
+nivel del escalamiento (A9), el plazo de «Sin clasificar» (P3), el vencimiento de transferencias
+(A1). También las métricas: la primera respuesta se compara contra el plazo de la Regla 2, que va en
+horas hábiles, pero se medía en minutos de reloj (M7, A15). **Reporting no puede referenciar
+Infrastructure** —solo Domain y Contracts—, y abrirle esa referencia lo pondría a un paso de los
+servicios de dominio que V15 dejó fuera del panel.
+
+**Decisión:** `CalendarioLaboral` estático y sin E/S en Domain, que recibe los tramos de horario y un
+instante. La conversión a hora de Lima se muda con él. `HorarioAtencionService` queda como fachada
+que carga los tramos y delega; Reporting lee los mismos tramos con su contexto de solo lectura y
+llama al mismo cálculo.
+
+**Alternativa descartada:** duplicar el cálculo en Reporting. Dos implementaciones de «hora hábil»
+terminan diciendo cosas distintas, y el panel mediría el plazo de la Regla 2 con otra vara que la del
+escalamiento que lo hace cumplir.
+
+**Consecuencia:** Domain sigue sin dependencias —es aritmética de fechas— y el calendario se prueba
+sin base. Especificación en `auditoria/03-analisis-brechas.md` §ARQ-08.
+
+### V32 — Los avisos operativos son alertas agrupadas, fuera de la outbox
+
+**Problema:** `EnvioOmitidoSinPlantilla`, `VacanteSinFormulario`, `MenuSinOpciones`, `MenuTruncado` y
+`EnvioRequierePlantilla` se publicaban en la outbox sin consumidor (M1). Gracias a V9 no tapan la
+cola, pero quedan `Pendiente` para siempre, crecen contra el tope de 10 GB de SQL Express y nadie los
+ve. No son trabajo que un consumidor ejecute: son situaciones que una persona tiene que resolver
+—aprobar una plantilla, cargar el formulario de una vacante—.
+
+**Decisión:** **refuerza V9: la outbox no es un buzón de avisos.** Estos avisos se registran en una
+tabla propia, `AlertasOperativas`, **agrupados por (Tipo, Clave)**: una fila abierta con contador de
+ocurrencias y fecha de la última, hasta que alguien la resuelve. `EnvioRequierePlantilla` deja de
+publicarse, porque la auditoría ya lo registra. El health pasa a `Degraded` con alertas abiertas de
+plantilla no aprobada o vacante sin formulario, que son las que dejan postulantes sin respuesta.
+
+**Por qué agrupadas:** una plantilla sin aprobar dispara la misma alerta por cada postulante que la
+necesita. Una fila por ocurrencia enterraría lo único que importa: que la plantilla falta.
+
+**Sin datos personales:** la clave identifica lo que hay que arreglar (`hc:12`,
+`plantilla:cierre_cortesia`), no a la persona afectada, y el detalle tampoco lleva teléfono, nombre ni
+DNI. Así la alerta no entra en la purga ni en la anonimización de la Regla 17.
+
+Especificación en `auditoria/03-analisis-brechas.md` §ARQ-09.
+
+### V33 — Los adjuntos del postulante se descargan, se escanean y tienen retención
+
+**Problema:** imagen, documento y audio se guardaban como el texto `[image]`, sin bajar el archivo
+(M3). Mandar el CV por WhatsApp es habitual, y ese CV no dejaba nada utilizable. Además el
+identificador de medio de Meta caduca: lo que no se descarga pronto se pierde.
+
+**Decisión:** tabla `MensajesAdjuntos`, colgada del mensaje y con estado (pendiente, descargado,
+rechazado, purgado). El webhook solo registra el adjunto; un bucle del Worker lo descarga a través de
+`IWhatsAppProvider` —el adaptador sigue siendo lo único que habla con Meta o 360dialog— y lo guarda
+con el mismo circuito que el CV propio: cuarentena, antivirus, tope de tamaño y extensiones
+permitidas, en el recurso compartido de D5. Lo que no pasa el escaneo queda rechazado y no se
+muestra.
+
+**Retención:** un adjunto es un dato personal de la misma naturaleza que el CV, así que entra en la
+purga de la Regla 17 (`datos.retencion_adjuntos_dias`) y en la anonimización por DNI.
+
+**Lo que queda por fijar:** desde cuándo cuenta el plazo. A5 (D7) cuenta la retención del CV desde la
+última actividad del postulante, para no borrar el de alguien en proceso; la especificación de
+adjuntos no lo dice, y su índice por fecha de recepción sugiere contar desde ahí. Un CV llegado por
+WhatsApp no debería vencer antes que uno llegado por el formulario: debe seguir el criterio de A5.
+
+Especificación en `auditoria/03-analisis-brechas.md` §ARQ-10.
+
+### V34 — El token lleva la versión de seguridad del analista
+
+**Problema:** V20 dejó la revocación para después, porque «revocar necesita estado que hoy no existe».
+En la práctica, un analista desactivado o con el rol cambiado conserva su token hasta 9 horas (M10):
+sigue leyendo y respondiendo conversaciones, o conserva la visibilidad total de Sistemas después de
+haberla perdido.
+
+**Decisión:** `Analistas.VersionSeguridad`, que se incrementa al desactivar, cambiar el rol o
+restablecer la contraseña. El token lleva esa versión como claim, y la Api la compara en cada
+validación —también la del hub— contra la base, con una caché corta. Si no coincide o el analista
+está inactivo, el token deja de servir y la bandeja lo trata como sesión cerrada.
+
+**Cierra lo que V20 dejó pendiente sin introducir estado de sesión:** no hay tabla de tokens emitidos
+ni lista negra de `jti` que crezca y haya que purgar. El estado es un entero en una fila que ya
+existe. Revoca todos los tokens de una persona a la vez, que es lo que piden los tres casos; no
+revoca un token suelto, y ninguno lo necesita.
+
+**Costo aceptado:** la caché deja hasta un minuto de gracia, contra las 9 horas de hoy, a cambio de no
+leer la base en cada request. Sigue sin haber refresh token (V20). Especificación en
+`auditoria/03-analisis-brechas.md` §ARQ-11.
+
+### V35 — Una regla que falla aborta la evaluación y el evento se reintenta
+
+**Problema:** `MotorReglas` captura la excepción de una regla, la registra y sigue con las demás. Es
+un comportamiento documentado en su comentario, pensado para que una regla rota no tumbe el
+procesamiento del mensaje. Pero las reglas siguientes deciden sin la decisión de la que falló, y el
+evento se marca procesado igual: el comentario promete que «queda en la outbox para reintento», y no
+es así, porque la excepción nunca llega al consumidor.
+
+**Decisión:** se invierte. La regla que lanza se registra y la excepción se **relanza**. Con V28 el
+evento completo hace rollback —incluidos los envíos encolados (V29)— y el consumidor lo reintenta.
+
+**Por qué ahora y no antes:** sin transacción, abortar dejaba escritas las acciones ya aplicadas, y
+seguir era el mal menor. Con transacción, seguir tras un fallo confirma a propósito un conjunto de
+decisiones incompleto; abortar no deja nada.
+
+**Consecuencia:** una regla con un error determinista hace fallar su evento en cada intento, y con él
+las demás reglas de ese evento, hasta que agota los reintentos y queda `Fallido` con su error. Es
+preferible a un comportamiento parcial que nadie nota. La prueba del motor que esperaba continuar pasa
+a esperar la excepción. Especificación en `auditoria/03-analisis-brechas.md` §COR-04.
+
+### V36 — El bot habla en texto libre dentro de la ventana
+
+**Problema:** V8 partía de que los mensajes del bot salen con plantilla. Las reglas pedían plantilla
+aunque el postulante acabara de escribir o de completar el formulario, y como las 6 plantillas están
+inactivas hasta que Meta las apruebe, el envío se omitía (C3). Tras completar el formulario —el punto
+de mayor abandono del embudo— no llegaba la confirmación, ni el aviso de vacante cerrada, ni el cierre
+de cortesía. El recordatorio de 24h además se sellaba aunque no hubiera salido, y se perdía para
+siempre.
+
+**Decisión (P1, D7):** dentro de la ventana de 24h el bot usa texto libre; la plantilla es para cuando
+la ventana está cerrada. Las reglas afectadas —3, 9 en confirmación y recordatorio, 12 y 20— devuelven
+una sola acción con el texto y la clave de la plantilla equivalente, y el ejecutor elige al encolar:
+
+- ventana abierta → texto libre;
+- ventana cerrada y plantilla activa → plantilla;
+- ventana cerrada sin plantilla activa → **no se envía** y se registra la alerta `PlantillaNoAprobada`
+  (V32).
+
+Una marca que depende del envío, como el recordatorio, se sella solo si el mensaje se encoló; mientras
+tanto queda pendiente y la alerta agrupada evita repetir el aviso. Los textos libres viven junto a los
+borradores de plantilla para que digan lo mismo.
+
+**Lo que no cambia de V8:** las plantillas siguen naciendo inactivas y nunca se activan desde código
+ni desde una migración. V36 cambia cuándo hace falta una plantilla, no cómo se habilita.
+
+**Respeta la Regla 15:** es exactamente lo que Meta permite. Sin opt-in no sale nada, ni texto ni
+plantilla; fuera de la ventana —medida desde el último entrante— solo plantilla aprobada. Y como el
+despachador revalida al enviar (V29), un texto encolado con la ventana abierta que se cierra antes de
+salir queda fallido en vez de salir fuera de norma. Especificación en
+`auditoria/03-analisis-brechas.md` §COR-03.
+
 ## Riesgos abiertos
 
 | Riesgo | Detalle | Mitigación |
@@ -516,7 +763,7 @@ nada más.
 | **SQL Server Express** | 10 GB por base y sin SQL Agent. | Suficiente para el volumen actual; los CVs van fuera de la BD y el Worker reemplaza al Agent. Confirmar la instancia de producción. |
 | **Aprobación del WABA** | Es el cuello de botella real del proyecto, no el desarrollo. | Iniciar el trámite desde el día 1 (Sección 10 del dossier). |
 | **Worker de instancia única** | `EventosSistema` no tiene reserva por fila. Dos Workers tomarían el mismo evento y podrían enviar el mismo mensaje dos veces, que es el patrón que causó el bloqueo original. | Candado de SQL Server (V24): una segunda instancia queda en espera. Queda una ventana corta si la activa pierde la conexión. Si el volumen desborda a una instancia, agregar reserva por fila antes de escalar, no después. |
-| **La marca de "reingreso" no existe en el modelo** | Las Reglas 9 y 16 dicen "salvo marca de contratado / descartado / reingreso", pero `EstadoPostulacion` solo tiene `EnProceso`, `Contratado`, `Descartado` y `Archivada`. Hoy las reglas deciden con lo que existe: la 16 no archiva si hay algo en proceso o contratado, y la 9 no repregunta si el analista ya decidió. | Confirmar con RRHH qué significa reingreso en la práctica antes de agregar el estado; el mini-cuestionario de estado del postulante ya estaba pendiente de definición en la Sección 12 del dossier. |
+| **La marca de "reingreso" no existe en el modelo** | Las Reglas 9 y 16 dicen "salvo marca de contratado / descartado / reingreso", pero `EstadoPostulacion` solo tiene `EnProceso`, `Contratado`, `Descartado` y `Archivada`. Hoy las reglas deciden con lo que existe: la 16 no archiva si hay algo en proceso o contratado, y la 9 no repregunta si el analista ya decidió. | **Definido por la resolución A2 (D7):** estado de postulación `Reingreso`, que marca el analista y cuenta como proceso vivo —no se archiva (Regla 16), no se repregunta la empresa (Regla 9) y sus mensajes van directo a su analista—. Se implementa en T2.06; hasta entonces las reglas siguen decidiendo con los estados existentes. |
 | **El CV vive en Google Drive** | Con Google Forms el adjunto queda en Drive y sólo guardamos su enlace. La purga de la Regla 17 limpia la referencia pero no puede borrar el archivo en el origen. | El Worker lo registra en el log cada vez que ocurre, para que quede el rastro del paso manual. Se resuelve solo al migrar el formulario a Razor Pages (D3), donde el CV entra por `IAlmacenamientoCv`. |
 
 ## Convenciones

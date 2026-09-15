@@ -611,8 +611,8 @@ sequenceDiagram
 base desde ahora: prevalecen sobre la redacción original de las tablas 5.1 y 5.2, que se conservan
 debajo solo como registro.
 
-**Tarea pendiente:** trasladar cada resolución a `docs/decisiones.md` (agente `arquitecto`). Está
-en el backlog de la Fase 4.
+**Registrado:** las resoluciones quedaron en `docs/decisiones.md` como D7 (con V30, V33 y V36) el
+2026-09-14, tarea T0.02.
 
 ### 5.0 Principios derivados
 

@@ -9,6 +9,7 @@ WhatsApp Business API oficial. 13 analistas, ~20 cuentas/clientes, ~16,000 inter
 - `docs/decisiones.md` — decisiones tomadas y desviaciones respecto del dossier, con su porqué.
 - `docs/Dossier_Maestro_WhatsApp_RRHH_v2.docx` — requisitos y las 20 reglas de negocio. Es la
   fuente de verdad funcional. La versión `_v2` es la vigente.
+- `docs/auditoria/04-documento-continuidad.md` — backlog vigente y protocolo de trabajo.
 
 ## Stack
 
