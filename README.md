@@ -426,8 +426,16 @@ Endpoints públicos, los únicos alcanzables desde internet sin autenticación:
 | `POST /jobforms/webhook-google` | Lo llama el Apps Script al enviarse el formulario |
 | `POST /jobforms/{token}/enviar` | Camino propio, para cuando se migre a Razor Pages |
 
-Los tres van detrás de un límite de 30 solicitudes por minuto y por IP. El webhook de Google exige
-además el secreto compartido en la cabecera `X-JobForms-Secreto`; sin `JobForms__SecretoWebhook`
+`GET /jobforms/{token}` y `POST /jobforms/{token}/enviar` van detrás de un límite de
+`JobForms:LimitePorMinuto` (30 por defecto) solicitudes por minuto y por IP.
+`POST /jobforms/webhook-google` tiene el suyo propio (COR-15): con el secreto compartido correcto
+en la cabecera `X-JobForms-Secreto`, todas las llamadas comparten el cupo de
+`JobForms:LimitePorMinutoWebhook` (600 por defecto) sin importar de qué IP salgan —las IPs de
+salida de Apps Script son compartidas entre scripts de distintos dueños, así que un límite por IP
+dejaría fuera al script legítimo junto con quien abusa—; sin el secreto correcto, o sin
+`JobForms__SecretoWebhook` configurada, cae al mismo límite por IP que los otros dos endpoints, con
+un cupo aparte para que agotarlo no afecte a quienes sí llaman sin autenticarse. El webhook de
+Google exige además el secreto compartido para no rechazar con 401; sin `JobForms__SecretoWebhook`
 configurada rechaza todo, que es el comportamiento buscado: preferimos no recibir nada antes que
 aceptar un envío que no podemos atribuir.
 
@@ -525,9 +533,13 @@ enviarse el formulario*. Tiene que ser instalable, porque el envío sale a la re
 **5. Comprobarlo.** Ejecutá `probarConfiguracion()` una vez: manda un token inexistente y espera que
 la Api lo rechace por eso. Si dice *URL y secreto OK*, quedó bien; un 401 es el secreto mal copiado.
 
-**Reintentos.** El script reintenta tres veces ante fallas pasajeras, y no reintenta un rechazo del
-negocio, que daría siempre lo mismo. Repetir un envío es seguro: la Api reconoce el que ya recibió,
-responde `yaRecibido` y no guarda otra respuesta ni le vuelve a escribir al postulante (V27).
+**Reintentos.** El script reintenta cinco veces ante fallas pasajeras, y no reintenta un rechazo del
+negocio, que daría siempre lo mismo. Un `429` (límite de velocidad, COR-15) tampoco es un rechazo
+del negocio: se reintenta respetando `Retry-After` si la Api lo manda, o si no con el mismo backoff
+exponencial que las demás fallas pasajeras, topado en 60 s por intento —el límite de ejecución de
+un disparador instalable es de 6 minutos, y `Utilities.sleep` no acepta más de 5—. Repetir un envío
+es seguro: la Api reconoce el que ya recibió, responde `yaRecibido` y no guarda otra respuesta ni le
+vuelve a escribir al postulante (V27).
 
 **Sin Google.** `scripts/probar-jobforms-local.ps1` manda el mismo cuerpo que el script, con el
 token de una invitación real:

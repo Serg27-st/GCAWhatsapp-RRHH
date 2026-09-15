@@ -1,10 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using RRHH.WhatsApp.Api.Configuracion;
+using RRHH.WhatsApp.Api.Seguridad;
 using RRHH.WhatsApp.Application.Casos;
 using RRHH.WhatsApp.Contracts.Bandeja;
 using RRHH.WhatsApp.Domain.Interfaces;
@@ -40,7 +39,8 @@ public sealed class JobFormsController(
     /// </summary>
     private const long TopeDuroBytes = 50 * 1024 * 1024;
 
-    public const string CabeceraSecreto = "X-JobForms-Secreto";
+    /// <summary>Alias del nombre real de la cabecera: <see cref="SecretoJobForms.Cabecera"/>, compartido con el limitador de velocidad (COR-15).</summary>
+    public const string CabeceraSecreto = SecretoJobForms.Cabecera;
 
     private readonly OpcionesJobForms _opciones = opciones.Value;
     private readonly OpcionesCv _cv = opcionesCv.Value;
@@ -83,7 +83,13 @@ public sealed class JobFormsController(
     /// Lo que llama el Apps Script de Google cuando alguien envia el formulario. Es el camino
     /// activo mientras el JobForms viva en Google Forms.
     /// </summary>
+    /// <remarks>
+    /// Su propio limite de velocidad (COR-15), particionado por secreto valido y no por IP:
+    /// reemplaza al de la clase para esta accion. <see cref="Estado"/> y <see cref="Enviar"/> siguen
+    /// con <see cref="PoliticasLimite.Publico"/>.
+    /// </remarks>
     [HttpPost("webhook-google")]
+    [EnableRateLimiting(PoliticasLimite.WebhookGoogle)]
     public async Task<IActionResult> WebhookGoogle(
         [FromBody] EnvioGoogleForms cuerpo, CancellationToken ct)
     {
@@ -179,7 +185,11 @@ public sealed class JobFormsController(
         }
     }
 
-    /// <summary>Comparacion de tiempo fijo: una comparacion normal filtra el secreto por el reloj.</summary>
+    /// <summary>
+    /// Delega la comparacion en <see cref="SecretoJobForms"/> —la misma que usa el limitador de
+    /// velocidad para separar el cupo del script del de un desconocido (COR-15)— y solo agrega el
+    /// log de configuracion faltante, que es lo unico que le concierne al controlador.
+    /// </summary>
     private bool SecretoValido()
     {
         if (!_opciones.EstaConfigurado)
@@ -188,12 +198,7 @@ public sealed class JobFormsController(
             return false;
         }
 
-        if (!Request.Headers.TryGetValue(CabeceraSecreto, out var recibido))
-            return false;
-
-        return CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(recibido.ToString()),
-            Encoding.UTF8.GetBytes(_opciones.SecretoWebhook));
+        return SecretoJobForms.EsValido(Request.Headers, _opciones);
     }
 
     /// <summary>Lo que manda el Apps Script del formulario de Google.</summary>

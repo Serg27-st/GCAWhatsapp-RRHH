@@ -1,4 +1,3 @@
-using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -102,26 +101,12 @@ builder.Services.Configure<OpcionesJobForms>(builder.Configuration.GetSection(Op
 // V25: el correo del primer analista de Sistemas, para poner en marcha una base nueva.
 builder.Services.Configure<OpcionesArranque>(builder.Configuration.GetSection(OpcionesArranque.Seccion));
 
-var limitePorMinuto = builder.Configuration
-    .GetSection(OpcionesJobForms.Seccion)
-    .GetValue("LimitePorMinuto", 30);
+var jobForms = builder.Configuration.GetSection(OpcionesJobForms.Seccion).Get<OpcionesJobForms>()
+    ?? new OpcionesJobForms();
 
-// Los endpoints del JobForms son los unicos alcanzables desde internet sin autenticacion. Sin un
-// tope quedan expuestos a abuso automatizado (Seccion 9.6.1). El webhook de WhatsApp no lleva
-// limite a proposito: quien lo llama es 360dialog, y descartarle entregas provoca reintentos.
-builder.Services.AddRateLimiter(opciones =>
-{
-    opciones.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-
-    opciones.AddPolicy(PoliticasLimite.Publico, contexto =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            contexto.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = limitePorMinuto,
-                Window = TimeSpan.FromMinutes(1)
-            }));
-});
+// El registro vive en LimitesVelocidad para poder probar las particiones sin levantar el host
+// (COR-15/T0.06).
+builder.Services.AddRateLimiter(opciones => LimitesVelocidad.Configurar(opciones, jobForms));
 
 builder.Services.AgregarInfraestructura(builder.Configuration);
 builder.Services.AgregarReporting(builder.Configuration);

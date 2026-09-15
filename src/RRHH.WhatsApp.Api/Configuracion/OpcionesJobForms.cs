@@ -15,8 +15,20 @@ public sealed class OpcionesJobForms
     /// </summary>
     public string SecretoWebhook { get; set; } = string.Empty;
 
-    /// <summary>Solicitudes por minuto y por IP en los endpoints publicos.</summary>
+    /// <summary>
+    /// Solicitudes por minuto y por IP en los endpoints publicos. Tambien es el tope de
+    /// <c>webhook-google</c> cuando la solicitud no trae el secreto correcto (Politicas
+    /// LimiteWebhookGoogle): sin poder distinguir al script legitimo de un desconocido, cae al
+    /// mismo cupo que el resto.
+    /// </summary>
     public int LimitePorMinuto { get; set; } = 30;
+
+    /// <summary>
+    /// Solicitudes por minuto para quien SI trae el secreto valido en <c>webhook-google</c>
+    /// (COR-15). Bien por encima del tope publico porque esta particion la comparten todas las
+    /// llamadas legitimas del Apps Script, sin importar de que IP salgan.
+    /// </summary>
+    public int LimitePorMinutoWebhook { get; set; } = 600;
 
     public bool EstaConfigurado => !string.IsNullOrWhiteSpace(SecretoWebhook);
 }

@@ -25,8 +25,15 @@ const PREGUNTAS = {
 const PREFIJO_PAIS = '+51';
 
 /** Reintentos ante fallas pasajeras. Repetir un envio es seguro: la Api es idempotente (V27). */
-const REINTENTOS = 3;
+const REINTENTOS = 5;
 const ESPERA_INICIAL_MS = 2000;
+
+/**
+ * Tope por intento cuando la Api pide esperar con Retry-After (COR-15). Apps Script corta la
+ * ejecucion de un disparador instalable a los 6 minutos y Utilities.sleep no acepta mas de 5, asi
+ * que un Retry-After mas largo se recorta aca en vez de dejar que la llamada reviente sola.
+ */
+const ESPERA_MAXIMA_MS = 60000;
 
 /**
  * Disparador instalable "Al enviarse el formulario". Unico punto de entrada.
@@ -175,8 +182,30 @@ function entregar(envio) {
       return;
     }
 
-    // Un 4xx no se reintenta: insistir da lo mismo. 401 es el secreto mal puesto; 422, un rechazo
-    // del negocio —vacante cerrada, sin consentimiento, token desconocido— que ya no cambia.
+    // 429: el limite de velocidad propio del webhook (COR-15) no es un rechazo del negocio, es una
+    // senal de que hay que esperar y volver a intentar. Va antes de la rama de rechazo 4xx a
+    // proposito: si cayera en esa rama, una campana con muchos postulantes a la vez perderia
+    // postulaciones por agotar los reintentos del script con un problema que se resuelve solo.
+    if (codigo === 429) {
+      const segundos = segundosDeRetryAfter(respuesta);
+      const esperaEfectiva = Math.min(
+        segundos !== null ? segundos * 1000 : espera,
+        ESPERA_MAXIMA_MS
+      );
+
+      console.warn('Intento ' + intento + ' limitado por velocidad (429). Se reintenta en ' + esperaEfectiva + ' ms.');
+
+      if (intento < REINTENTOS) {
+        Utilities.sleep(esperaEfectiva);
+        espera = espera * 2;
+      }
+
+      continue;
+    }
+
+    // El resto de los 4xx no se reintenta: insistir da lo mismo. 401 es el secreto mal puesto; 422,
+    // un rechazo del negocio —vacante cerrada, sin consentimiento, token desconocido— que ya no
+    // cambia.
     if (codigo >= 400 && codigo < 500) {
       throw new Error('La Api rechazo el envio (' + codigo + '): ' + respuesta.getContentText());
     }
@@ -184,7 +213,7 @@ function entregar(envio) {
     console.warn('Intento ' + intento + ' fallido (' + codigo + '). Se reintenta.');
 
     if (intento < REINTENTOS) {
-      Utilities.sleep(espera);
+      Utilities.sleep(Math.min(espera, ESPERA_MAXIMA_MS));
       espera = espera * 2;
     }
   }
@@ -192,6 +221,26 @@ function entregar(envio) {
   // Queda como ejecucion fallida: Google le avisa por correo a quien es dueno del script. Del lado
   // del sistema, el analista se entera igual por el aviso de 48h de la Regla 9.
   throw new Error('No se pudo entregar el envio despues de ' + REINTENTOS + ' intentos.');
+}
+
+/**
+ * Segundos que pide esperar la cabecera Retry-After, o null si no vino o no es un numero. Se busca
+ * sin distinguir mayusculas porque UrlFetchApp entrega las cabeceras tal como las mando el
+ * servidor, sin garantia de que lleguen en minusculas.
+ */
+function segundosDeRetryAfter(respuesta) {
+  const cabeceras = respuesta.getAllHeaders() || {};
+  const clave = Object.keys(cabeceras).filter(function (nombre) {
+    return nombre.toLowerCase() === 'retry-after';
+  })[0];
+
+  if (!clave) {
+    return null;
+  }
+
+  const valor = parseInt([].concat(cabeceras[clave])[0], 10);
+
+  return isNaN(valor) ? null : valor;
 }
 
 function llamar(envio) {

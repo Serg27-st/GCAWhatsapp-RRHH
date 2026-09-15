@@ -110,4 +110,61 @@ public class ContratoAppsScriptTests
 
         Assert.False(envio.TokenValido(out _));
     }
+
+    /// <summary>
+    /// Encuentra la raiz de la solucion subiendo desde donde corren las pruebas, hasta dar con el
+    /// .sln. El script vive fuera de <c>tests/</c> (en <c>scripts/apps-script/</c>), asi que no hay
+    /// una ruta relativa fija que funcione sin depender de donde el runner ubique el binario.
+    /// </summary>
+    private static string RutaRaizSolucion()
+    {
+        var directorio = new DirectoryInfo(AppContext.BaseDirectory);
+
+        while (directorio is not null &&
+               !File.Exists(Path.Combine(directorio.FullName, "RRHH.WhatsApp.sln")))
+        {
+            directorio = directorio.Parent;
+        }
+
+        if (directorio is null)
+        {
+            throw new InvalidOperationException(
+                "No se encontro RRHH.WhatsApp.sln subiendo desde " + AppContext.BaseDirectory);
+        }
+
+        return directorio.FullName;
+    }
+
+    private static string LeerCodigoDelScript() => File.ReadAllText(
+        Path.Combine(RutaRaizSolucion(), "scripts", "apps-script", "Codigo.gs"));
+
+    /// <summary>
+    /// Contrato textual, no ejecutable (COR-15/T0.06): el script vive en Google y no corre dentro de
+    /// .NET, asi que esto no reemplaza probarlo en Apps Script. Lo que evita es que alguien retroceda
+    /// el manejo del 429 sin darse cuenta —un limite de velocidad no es un rechazo del negocio, y
+    /// tratarlo como uno le haria perder postulaciones a una campana con muchos envios a la vez.
+    /// </summary>
+    [Fact]
+    public void El_script_reintenta_el_429_antes_de_tratarlo_como_rechazo_y_respeta_Retry_After()
+    {
+        var codigo = LeerCodigoDelScript();
+
+        Assert.Contains("const REINTENTOS = 5;", codigo);
+        Assert.Contains("Retry-After", codigo);
+        Assert.Contains("ESPERA_MAXIMA_MS", codigo);
+
+        var indiceManejo429 = codigo.IndexOf("codigo === 429", StringComparison.Ordinal);
+        var indiceRechazo4xx = codigo.IndexOf("codigo >= 400 && codigo < 500", StringComparison.Ordinal);
+
+        Assert.True(indiceManejo429 >= 0, "El script deberia distinguir el 429 explicitamente.");
+        Assert.True(indiceRechazo4xx >= 0, "El script deberia seguir rechazando el resto de los 4xx.");
+        Assert.True(
+            indiceManejo429 < indiceRechazo4xx,
+            "El 429 tiene que resolverse antes de la rama que trata todo 4xx como rechazo definitivo.");
+
+        // Entre el chequeo del 429 y el de "el resto de los 4xx" no puede haber un throw: si lo
+        // hubiera, el 429 seguiria siendo un rechazo definitivo pese a distinguirse del resto.
+        var bloque429 = codigo[indiceManejo429..indiceRechazo4xx];
+        Assert.DoesNotContain("throw new Error", bloque429);
+    }
 }
