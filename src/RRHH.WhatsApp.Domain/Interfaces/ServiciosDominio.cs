@@ -4,6 +4,25 @@ using RRHH.WhatsApp.Domain.Enums;
 namespace RRHH.WhatsApp.Domain.Interfaces;
 
 /// <summary>
+/// Frontera transaccional explicita de un caso de uso (V28, ARQ-02). Los servicios siguen guardando
+/// con su propio SaveChanges; dentro de <see cref="EjecutarAsync"/> esos guardados se confirman o se
+/// deshacen juntos. Sin esto, un fallo a mitad del webhook o de la outbox dejaba escrita la primera
+/// parte y el reintento reprocesaba sobre un estado a medias (C5, C6).
+/// </summary>
+public interface IUnidadTrabajo
+{
+    /// <summary>
+    /// Ejecuta <paramref name="trabajo"/> en una transaccion. Si ya hay una abierta en el mismo
+    /// ambito la reutiliza sin confirmarla: la confirma quien la abrio. Si el trabajo lanza, se
+    /// deshace y la excepcion sale tal cual.
+    /// </summary>
+    Task EjecutarAsync(Func<CancellationToken, Task> trabajo, CancellationToken ct = default);
+
+    /// <inheritdoc cref="EjecutarAsync(Func{CancellationToken, Task}, CancellationToken)"/>
+    Task<T> EjecutarAsync<T>(Func<CancellationToken, Task<T>> trabajo, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Unico punto de acceso a la tabla de Conversaciones. El resto del sistema pasa por aca y
 /// nunca toca sus tablas directamente.
 /// </summary>

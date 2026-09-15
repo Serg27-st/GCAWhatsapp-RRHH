@@ -31,6 +31,10 @@ public static class RegistroDependencias
         servicios.AddDbContext<RrhhDbContext>(opciones => opciones.UseSqlServer(cadena));
         servicios.AddMemoryCache();
 
+        // V28: un caso de uso se confirma o se deshace entero. Scoped como el DbContext, porque
+        // la transaccion vive en la conexion de ese contexto.
+        servicios.AddScoped<IUnidadTrabajo, UnidadTrabajoEf>();
+
         // ARQ-01: sin reloj inyectable los barridos por tiempo (R2, R9, R16) no se pueden probar de
         // punta a punta, y por eso se escaparon C1 y AL10. TryAdd para que un host de pruebas pueda
         // registrar otro reloj (por ejemplo un FakeTimeProvider) antes de llamar a este metodo.

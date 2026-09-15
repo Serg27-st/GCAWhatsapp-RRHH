@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -64,6 +65,9 @@ internal sealed class EntornoDeReglas : IDisposable
     {
         var opciones = new DbContextOptionsBuilder<RrhhDbContext>()
             .UseInMemoryDatabase($"reglas-{Guid.NewGuid()}")
+            // V28: los casos de uso abren transacciones y EF InMemory no las soporta; sin esto la
+            // advertencia se vuelve excepcion. Lo transaccional se prueba contra SQL Server.
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
         Db = new RrhhDbContext(opciones);
