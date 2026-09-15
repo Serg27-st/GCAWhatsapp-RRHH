@@ -131,4 +131,12 @@ public sealed class JobFormsService(
             .AsNoTracking()
             .OrderByDescending(r => r.RespuestaId)
             .FirstOrDefaultAsync(r => r.InvitacionId == invitacionId, ct);
+
+    /// <summary>
+    /// COR-15/M8: delega en el almacenamiento, sin tocar ninguna fila. Quien llama ya sabe que el
+    /// CV no quedo asociado a ninguna respuesta -- si lo estuviera, correspondería
+    /// <see cref="PurgarCvAsync"/>, que ademas limpia la referencia y audita.
+    /// </summary>
+    public Task EliminarCvAsync(string ruta, CancellationToken ct = default) =>
+        almacenamiento.EliminarAsync(ruta, ct);
 }

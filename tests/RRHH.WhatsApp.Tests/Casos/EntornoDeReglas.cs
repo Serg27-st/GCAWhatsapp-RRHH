@@ -41,6 +41,7 @@ internal sealed class EntornoDeReglas : IDisposable
     public RecepcionJobForms RecepcionFormulario { get; }
     public EnvioAnalista Envio { get; }
     public AccionesBandeja Bandeja { get; }
+    public ICuentaService Cuentas { get; }
     public string CarpetaCv { get; }
 
     public EntornoDeReglas()
@@ -60,6 +61,7 @@ internal sealed class EntornoDeReglas : IDisposable
         var horarios = new HorarioAtencionService(Db, NullLogger<HorarioAtencionService>.Instance);
         var ausencias = new AusenciaService(Db);
         var cuentas = new CuentaService(Db);
+        Cuentas = cuentas;
         var plantillas = new PlantillaService(Db, NullLogger<PlantillaService>.Instance);
         var auditoria = new AuditoriaService(Db);
 

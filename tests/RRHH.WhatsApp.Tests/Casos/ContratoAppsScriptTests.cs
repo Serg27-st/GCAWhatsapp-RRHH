@@ -167,4 +167,27 @@ public class ContratoAppsScriptTests
         var bloque429 = codigo[indiceManejo429..indiceRechazo4xx];
         Assert.DoesNotContain("throw new Error", bloque429);
     }
+
+    /// <summary>
+    /// T0.07b, contrato textual: el script manda el documento tal como lo escribio la persona y la
+    /// Api lo normaliza (<c>DocumentoIdentidad</c>). Quitarle las letras en el script mutilaba el
+    /// carne de extranjeria, y la Api terminaba rechazando a un postulante valido.
+    /// </summary>
+    [Fact]
+    public void El_script_no_le_quita_las_letras_al_documento()
+    {
+        var codigo = LeerCodigoDelScript();
+
+        Assert.Contains("const dni = texto(respuestas[PREGUNTAS.dni]);", codigo);
+        Assert.DoesNotContain("soloDigitos(respuestas[PREGUNTAS.dni])", codigo);
+    }
+
+    [Fact]
+    public void La_Api_acepta_el_carne_de_extranjeria_tal_como_lo_manda_el_script()
+    {
+        var envio = Leer(EnvioDelScript.Replace("\"45678912\"", "\"ce 001234567\""));
+
+        Assert.True(RRHH.WhatsApp.Domain.Entidades.DocumentoIdentidad.TryNormalizar(envio.Dni, out var dni));
+        Assert.Equal("CE001234567", dni);
+    }
 }

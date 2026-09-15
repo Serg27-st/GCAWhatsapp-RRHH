@@ -93,7 +93,9 @@ function armarEnvio(respuestas) {
     throw new Error('El envio llego sin token: revisar el enlace prellenado cargado en la vacante.');
   }
 
-  const dni = soloDigitos(respuestas[PREGUNTAS.dni]);
+  // Tal como lo escribio la persona: la Api lo normaliza y decide si es valido (T0.07). Quitarle
+  // aca todo lo que no fuera digito mutilaba el carne de extranjeria, que lleva letras.
+  const dni = texto(respuestas[PREGUNTAS.dni]);
 
   if (!dni) {
     throw new Error('El envio llego sin DNI, que es el identificador del postulante (Regla 9).');
@@ -271,12 +273,6 @@ function texto(respuesta) {
   const valor = [].concat(respuesta).join(', ').trim();
 
   return valor.length > 0 ? valor : null;
-}
-
-function soloDigitos(respuesta) {
-  const valor = texto(respuesta);
-
-  return valor ? valor.replace(/[^0-9]/g, '') : null;
 }
 
 function hayRespuesta(respuesta) {

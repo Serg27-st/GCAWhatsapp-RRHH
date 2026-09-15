@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RRHH.WhatsApp.Api.Mapeo;
 using RRHH.WhatsApp.Application.Casos;
 using RRHH.WhatsApp.Contracts.Bandeja;
+using RRHH.WhatsApp.Domain.Entidades;
 using RRHH.WhatsApp.Domain.Enums;
 using RRHH.WhatsApp.Domain.Interfaces;
 
@@ -61,7 +62,12 @@ public sealed class ConversacionesController(
         if (string.IsNullOrWhiteSpace(dni))
             return BadRequest(new { motivo = "Falta el DNI." });
 
-        var hilos = await conversaciones.BuscarPorDniAsync(dni.Trim(), User.AnalistaId(), ct);
+        // T0.07a: el JobForms guarda el DNI normalizado. Buscar con lo que escribio el analista
+        // —con puntos, guiones o en minusculas— no encontraria a la persona.
+        if (!DocumentoIdentidad.TryNormalizar(dni, out var normalizado))
+            return BadRequest(new { motivo = "El DNI no tiene un formato valido." });
+
+        var hilos = await conversaciones.BuscarPorDniAsync(normalizado, User.AnalistaId(), ct);
 
         return Ok(hilos.Select(c => c.AResumen()));
     }

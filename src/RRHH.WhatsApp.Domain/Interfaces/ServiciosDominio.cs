@@ -381,6 +381,15 @@ public interface IJobFormsService
 
     /// <summary>Borra el CV y limpia su referencia, dejando constancia en la auditoria.</summary>
     Task PurgarCvAsync(int respuestaId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Borra un CV ya guardado que no quedo asociado a ninguna fila: el camino propio de
+    /// <c>Enviar</c> (COR-15/M8) lo guarda antes de saber si <c>recepcion.ProcesarAsync</c> va a
+    /// aceptar el envio, y si no lo acepta el archivo queda huerfano en el recurso compartido
+    /// (invariante 9). A diferencia de <see cref="PurgarCvAsync"/>, no toca ninguna fila: no hay
+    /// respuesta que limpiar porque nunca llego a guardarse.
+    /// </summary>
+    Task EliminarCvAsync(string ruta, CancellationToken ct = default);
 }
 
 /// <summary>

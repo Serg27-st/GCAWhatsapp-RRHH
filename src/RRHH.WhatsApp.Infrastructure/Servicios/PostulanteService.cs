@@ -76,7 +76,9 @@ public sealed class PostulanteService(
     public async Task AnonimizarDatosAsync(string dni, string motivo, CancellationToken ct = default)
     {
         var postulante = await db.Postulantes.FirstOrDefaultAsync(p => p.Dni == dni, ct)
-            ?? throw new InvalidOperationException($"No existe un postulante con DNI {dni}.");
+            // Sin el DNI en el mensaje: el controlador lo registra en el log, y un pedido de borrado
+            // de la Regla 17 no deberia dejar el dato que se pidio borrar escrito en otro lado.
+            ?? throw new InvalidOperationException("No existe un postulante con ese DNI.");
 
         var id = postulante.PostulanteId;
 

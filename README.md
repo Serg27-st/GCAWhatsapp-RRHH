@@ -439,6 +439,29 @@ Google exige además el secreto compartido para no rechazar con 401; sin `JobFor
 configurada rechaza todo, que es el comportamiento buscado: preferimos no recibir nada antes que
 aceptar un envío que no podemos atribuir.
 
+**Lo que se valida del cuerpo (COR-15/M8).** Los dos caminos —`webhook-google` y `{token}/enviar`—
+normalizan el DNI con `DocumentoIdentidad.TryNormalizar` (Domain, sin dependencias): 8 dígitos
+(DNI) o 9 a 12 alfanuméricos (carné de extranjería), sin espacios, guiones ni puntos, en
+mayúsculas. Nulo o con otro formato responde `422`, nunca el `500` que daba antes un DNI nulo. El
+DNI nunca va a un log ni a un mensaje de error con su valor (CLAUDE.md): si algo falla, el motivo
+es genérico.
+
+`CvUrl` (solo en `webhook-google`; el camino propio recibe el CV como archivo) tiene que ser una
+URL absoluta `https` cuyo host coincida **exacto** con uno de `JobForms:DominiosCvPermitidos`
+(`drive.google.com`, `docs.google.com` por defecto) — no `EndsWith` ni `Contains`, que dejarían
+pasar `drive.google.com.evil.com` o `https://evil.com/drive.google.com`. La propiedad nace `null` a
+propósito: si trajera el default ya cargado, el binder de configuración de .NET **sumaría** los
+índices de `appsettings.json` en vez de reemplazarlos. Se lee siempre a través de
+`DominiosCvPermitidosEfectivos`.
+
+**CV huérfano (`{token}/enviar`).** Antes de tocar el disco se revalida que la invitación exista y,
+si no está completada todavía, que la vacante siga abierta (Regla 20) — puede haberse cerrado
+mientras el postulante llenaba el formulario. Si la invitación ya está completada (V27, reintento
+idempotente), no se guarda ningún archivo: `recepcion.ProcesarAsync` responde `yaRecibido` sin
+tocar el disco. Si el CV se guardó y `recepcion.ProcesarAsync` termina rechazando el envío (o
+resulta que ya estaba recibido), el archivo se borra con `IJobFormsService.EliminarCvAsync` en
+mejor esfuerzo: si el borrado falla, queda en el log de error, pero no tapa la respuesta original.
+
 **Campos opcionales por vacante.** Además de los campos fijos (DNI, CV), cada `HC` puede tener sus
 propias preguntas, configuradas por el analista:
 

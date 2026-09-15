@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RRHH.WhatsApp.Api.Seguridad;
+using RRHH.WhatsApp.Domain.Entidades;
 using RRHH.WhatsApp.Domain.Interfaces;
 
 namespace RRHH.WhatsApp.Api.Controllers;
@@ -27,6 +28,12 @@ public sealed class PostulantesController(
     [HttpGet("{dni}/historial")]
     public async Task<IActionResult> Historial(string dni, CancellationToken ct)
     {
+        // T0.07a: se busca con la misma forma con la que el JobForms guarda el DNI.
+        if (!DocumentoIdentidad.TryNormalizar(dni, out var normalizado))
+            return BadRequest(new { motivo = "El DNI no tiene un formato valido." });
+
+        dni = normalizado;
+
         var postulante = await postulantes.BuscarPorDniAsync(dni, ct);
 
         if (postulante is null)
@@ -78,10 +85,15 @@ public sealed class PostulantesController(
     public async Task<IActionResult> Eliminar(
         string dni, [FromQuery] string? motivo, CancellationToken ct)
     {
+        // T0.07a: con el DNI escrito de otra forma la anonimizacion responderia 404 y la solicitud
+        // de la Regla 17 quedaria sin cumplir, con los datos todavia en la base.
+        if (!DocumentoIdentidad.TryNormalizar(dni, out var normalizado))
+            return BadRequest(new { motivo = "El DNI no tiene un formato valido." });
+
         try
         {
             await postulantes.AnonimizarDatosAsync(
-                dni, motivo ?? "Solicitud del titular de los datos.", ct);
+                normalizado, motivo ?? "Solicitud del titular de los datos.", ct);
 
             log.LogInformation("El analista {AnalistaId} anonimizo los datos de un postulante.", User.AnalistaId());
 
