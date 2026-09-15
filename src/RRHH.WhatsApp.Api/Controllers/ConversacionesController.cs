@@ -23,8 +23,15 @@ public sealed class ConversacionesController(
     IPostulacionService postulaciones,
     EnvioAnalista envio,
     AccionesBandeja acciones,
+    TimeProvider reloj,
     ILogger<ConversacionesController> log) : ControllerBase
 {
+    /// <summary>
+    /// ARQ-01: el mapeo recibe el instante en vez de leer el reloj del sistema. Se lee una vez por
+    /// peticion, asi todos los hilos de una lista se comparan contra el mismo momento.
+    /// </summary>
+    private DateTime Ahora() => reloj.GetUtcNow().UtcDateTime;
+
     /// <summary>
     /// Regla 4: el analista ve solo lo suyo; el rol Sistemas ve todo, para soporte y auditoria.
     /// </summary>
@@ -34,8 +41,9 @@ public sealed class ConversacionesController(
         try
         {
             var hilos = await conversaciones.ListarParaAnalistaAsync(User.AnalistaId(), ct);
+            var ahora = Ahora();
 
-            return Ok(hilos.Select(c => c.AResumen()));
+            return Ok(hilos.Select(c => c.AResumen(ahora)));
         }
         catch (InvalidOperationException ex)
         {
@@ -48,8 +56,9 @@ public sealed class ConversacionesController(
     public async Task<IActionResult> Pendientes(CancellationToken ct)
     {
         var hilos = await conversaciones.ListarPendientesClasificarAsync(ct);
+        var ahora = Ahora();
 
-        return Ok(hilos.Select(c => c.AResumen()));
+        return Ok(hilos.Select(c => c.AResumen(ahora)));
     }
 
     /// <summary>
@@ -68,8 +77,9 @@ public sealed class ConversacionesController(
             return BadRequest(new { motivo = "El DNI no tiene un formato valido." });
 
         var hilos = await conversaciones.BuscarPorDniAsync(normalizado, User.AnalistaId(), ct);
+        var ahora = Ahora();
 
-        return Ok(hilos.Select(c => c.AResumen()));
+        return Ok(hilos.Select(c => c.AResumen(ahora)));
     }
 
     /// <summary>El chat completo, con el aviso multi-cuenta de la Regla 6 en la cabecera.</summary>
@@ -104,7 +114,7 @@ public sealed class ConversacionesController(
         var soloLectura = HttpContext.Items[FiltroAccesoConversacion.ClaveNivel] is not NivelAcceso.Total;
 
         return Ok(new ConversacionDetalle(
-            conversacion.AResumen(otrasCuentas),
+            conversacion.AResumen(Ahora(), otrasCuentas),
             [.. hilo.Select(m => m.AResumen())],
             visibles,
             soloLectura));

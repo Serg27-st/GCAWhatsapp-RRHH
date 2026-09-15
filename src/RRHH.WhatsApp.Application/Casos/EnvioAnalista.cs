@@ -30,6 +30,7 @@ public sealed class EnvioAnalista(
     IEventoSistemaService eventos,
     IFabricaContextoRegla fabrica,
     IMotorReglas motor,
+    TimeProvider reloj,
     ILogger<EnvioAnalista> log)
 {
     public async Task<ResultadoRespuestaAnalista> ResponderAsync(
@@ -147,7 +148,7 @@ public sealed class EnvioAnalista(
         // Detiene el reloj de la Regla 2. Sin esta marca el Worker escalaria una conversacion que
         // el analista acaba de atender.
         await conversaciones.RegistrarRespuestaAnalistaAsync(
-            conversacion.ConversacionId, DateTime.UtcNow, ct);
+            conversacion.ConversacionId, reloj.GetUtcNow().UtcDateTime, ct);
 
         return new(true, null, RequierePlantilla: false, mensaje.MensajeId);
     }

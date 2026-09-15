@@ -17,7 +17,8 @@ namespace RRHH.WhatsApp.Api.Controllers;
 public sealed class AnalistasController(
     ICuentaService cuentas,
     IAusenciaService ausencias,
-    IAnalistaService analistas) : ControllerBase
+    IAnalistaService analistas,
+    TimeProvider reloj) : ControllerBase
 {
     /// <summary>
     /// Cuentas asignadas y en cuales es respaldo. Es lo que la bandeja usa para agrupar por
@@ -80,7 +81,7 @@ public sealed class AnalistasController(
         if (RechazarSiNoGestiona(id) is { } rechazo)
             return rechazo;
 
-        var vigentes = await ausencias.ListarVigentesAsync(id, DateTime.UtcNow, ct);
+        var vigentes = await ausencias.ListarVigentesAsync(id, reloj.GetUtcNow().UtcDateTime, ct);
 
         return Ok(vigentes.Select(a =>
             new AusenciaResumen(a.AusenciaId, a.AnalistaId, a.FechaInicio, a.FechaFin, a.Motivo)));
@@ -127,7 +128,7 @@ public sealed class AnalistasController(
     /// </summary>
     [HttpGet("{id:int}/ausente")]
     public async Task<IActionResult> Ausente(int id, CancellationToken ct) =>
-        Ok(new { analistaId = id, ausente = await ausencias.EstaAusenteAsync(id, DateTime.UtcNow, ct) });
+        Ok(new { analistaId = id, ausente = await ausencias.EstaAusenteAsync(id, reloj.GetUtcNow().UtcDateTime, ct) });
 
     /// <summary>
     /// La Regla 14 dice que la ausencia la marca "el analista (o su jefe)": cada uno las propias, y

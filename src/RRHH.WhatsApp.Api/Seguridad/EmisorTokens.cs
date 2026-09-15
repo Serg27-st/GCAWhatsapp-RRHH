@@ -25,13 +25,15 @@ public static class ClaimsAnalista
     public const string RolJefatura = "Jefatura";
 }
 
-public sealed class EmisorTokens(IOptions<OpcionesJwt> opciones)
+public sealed class EmisorTokens(IOptions<OpcionesJwt> opciones, TimeProvider reloj)
 {
     private readonly OpcionesJwt _opciones = opciones.Value;
 
     public (string Token, DateTime ExpiraUtc) Emitir(ResultadoAutenticacion analista)
     {
-        var expira = DateTime.UtcNow.AddHours(_opciones.VigenciaHoras);
+        // ARQ-01: el vencimiento sale del reloj inyectable. La validacion del token la hace el
+        // middleware JWT con el reloj del sistema; esto solo fija cuando expira.
+        var expira = reloj.GetUtcNow().UtcDateTime.AddHours(_opciones.VigenciaHoras);
 
         var claims = new List<Claim>
         {

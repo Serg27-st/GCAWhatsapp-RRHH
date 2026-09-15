@@ -16,7 +16,7 @@ namespace RRHH.WhatsApp.Api.Controllers;
 [ApiController]
 [Route("reportes")]
 [Authorize(Policy = Politicas.Jefatura)]
-public sealed class ReportesController(IReportingReadModel reporting) : ControllerBase
+public sealed class ReportesController(IReportingReadModel reporting, TimeProvider reloj) : ControllerBase
 {
     /// <summary>Dias que cubre el panel cuando no se indica periodo. Un mes es el ciclo del negocio.</summary>
     private const int DiasPorDefecto = 30;
@@ -25,7 +25,7 @@ public sealed class ReportesController(IReportingReadModel reporting) : Controll
     public async Task<IActionResult> Metricas(
         [FromQuery] DateTime? desde, [FromQuery] DateTime? hasta, CancellationToken ct)
     {
-        var hastaUtc = hasta?.ToUniversalTime() ?? DateTime.UtcNow;
+        var hastaUtc = hasta?.ToUniversalTime() ?? reloj.GetUtcNow().UtcDateTime;
         var desdeUtc = desde?.ToUniversalTime() ?? hastaUtc.AddDays(-DiasPorDefecto);
 
         if (hastaUtc <= desdeUtc)

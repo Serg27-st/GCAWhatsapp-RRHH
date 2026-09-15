@@ -39,7 +39,7 @@ public class ReintentoEnviosTests : IDisposable
 
     private ReintentoEnvios Crear() => new(
         _mensajes, _conversaciones, _plantillas, _proveedor,
-        new ConfiguracionFalsa(_db), NullLogger<ReintentoEnvios>.Instance);
+        new ConfiguracionFalsa(_db), TimeProvider.System, NullLogger<ReintentoEnvios>.Instance);
 
     /// <summary>Deja un saliente ya fallido por causa transitoria y con el intento vencido.</summary>
     private async Task<Mensaje> PrepararFallidoAsync(

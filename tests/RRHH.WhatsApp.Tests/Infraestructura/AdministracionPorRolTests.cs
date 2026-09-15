@@ -63,7 +63,7 @@ public class AdministracionPorRolTests
     };
 
     private AnalistasController Analistas(string rol) =>
-        new(_cuentas, _ausencias, _analistas) { ControllerContext = Como(rol) };
+        new(_cuentas, _ausencias, _analistas, TimeProvider.System) { ControllerContext = Como(rol) };
 
     private VacantesController Vacantes(string rol) =>
         new(_cuentas, _postulaciones, NullLogger<VacantesController>.Instance) { ControllerContext = Como(rol) };

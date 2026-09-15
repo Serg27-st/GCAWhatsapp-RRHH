@@ -13,8 +13,12 @@ public static class MapeoBandeja
     /// <summary>Duracion de la ventana de servicio de WhatsApp, medida desde el ultimo entrante.</summary>
     private static readonly TimeSpan Ventana = TimeSpan.FromHours(24);
 
+    /// <param name="ahoraUtc">
+    /// El instante lo pone quien llama (ARQ-01): con el reloj del sistema aca adentro, el borde de
+    /// la ventana de 24h de la Regla 15 no se podia probar.
+    /// </param>
     public static ConversacionResumen AResumen(
-        this Conversacion c, IReadOnlyList<string>? otrasCuentas = null)
+        this Conversacion c, DateTime ahoraUtc, IReadOnlyList<string>? otrasCuentas = null)
     {
         var ultimoEntrante = c.FechaUltimoMensajeEntrante;
 
@@ -32,7 +36,7 @@ public static class MapeoBandeja
             // Hay algo que atender cuando el postulante escribio despues de la ultima respuesta.
             EsperandoRespuesta: ultimoEntrante is not null
                 && (c.FechaUltimaRespuestaAnalista is null || c.FechaUltimaRespuestaAnalista < ultimoEntrante),
-            VentanaAbierta: ultimoEntrante is { } u && DateTime.UtcNow - u < Ventana,
+            VentanaAbierta: ultimoEntrante is { } u && ahoraUtc - u < Ventana,
             otrasCuentas ?? []);
     }
 

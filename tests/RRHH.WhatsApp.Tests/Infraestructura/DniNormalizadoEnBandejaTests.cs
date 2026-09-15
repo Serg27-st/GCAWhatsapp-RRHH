@@ -43,7 +43,7 @@ public class DniNormalizadoEnBandejaTests
 
     // Buscar solo usa el servicio de conversaciones; el resto de las dependencias no participa.
     private ConversacionesController Conversaciones() =>
-        new(_conversaciones, null!, null!, null!, null!, NullLogger<ConversacionesController>.Instance)
+        new(_conversaciones, null!, null!, null!, null!, TimeProvider.System, NullLogger<ConversacionesController>.Instance)
         {
             ControllerContext = ComoSistemas()
         };

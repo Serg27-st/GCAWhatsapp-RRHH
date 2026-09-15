@@ -127,7 +127,7 @@ internal sealed class EntornoDeReglas : IDisposable
             NullLogger<RecepcionJobForms>.Instance);
 
         Envio = new EnvioAnalista(
-            Proveedor, Conversaciones, mensajes, plantillas, Eventos, fabrica, motor,
+            Proveedor, Conversaciones, mensajes, plantillas, Eventos, fabrica, motor, reloj,
             NullLogger<EnvioAnalista>.Instance);
 
         Bandeja = new AccionesBandeja(Postulaciones, Eventos, NullLogger<AccionesBandeja>.Instance);

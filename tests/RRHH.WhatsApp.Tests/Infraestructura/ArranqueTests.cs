@@ -45,7 +45,7 @@ public class ArranqueTests
     private SesionController Controlador(string emailConfigurado = EmailSistemas) =>
         new(_autenticacion,
             _analistas,
-            new EmisorTokens(Options.Create(new OpcionesJwt())),
+            new EmisorTokens(Options.Create(new OpcionesJwt()), TimeProvider.System),
             Options.Create(new OpcionesArranque { EmailSistemas = emailConfigurado }),
             NullLogger<SesionController>.Instance);
 

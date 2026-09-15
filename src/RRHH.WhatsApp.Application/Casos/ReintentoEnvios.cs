@@ -34,11 +34,14 @@ public sealed class ReintentoEnvios(
     IPlantillaService plantillas,
     IWhatsAppProvider proveedor,
     IConfiguracionReglasService configuracion,
+    TimeProvider reloj,
     ILogger<ReintentoEnvios> log)
 {
     public async Task<ResumenReintentos> ProcesarAsync(int maximo, CancellationToken ct = default)
     {
-        var ahora = DateTime.UtcNow;
+        // ARQ-01: el retroceso exponencial (1m, 2m, 4m) se agenda contra este instante; con el
+        // reloj inyectable el reintento se puede probar sin esperar minutos reales.
+        var ahora = reloj.GetUtcNow().UtcDateTime;
         var pendientes = await mensajes.ListarPendientesDeReintentoAsync(maximo, ahora, ct);
 
         if (pendientes.Count == 0)
