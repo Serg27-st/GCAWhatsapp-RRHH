@@ -38,7 +38,7 @@ public class CamposOpcionalesTests : IDisposable
 
         _db.SaveChanges();
 
-        _cuentas = new CuentaService(_db);
+        _cuentas = new CuentaService(_db, TimeProvider.System);
     }
 
     private static HcCampoOpcional Campo(string nombre, TipoCampoOpcional tipo = TipoCampoOpcional.Texto,

@@ -11,7 +11,8 @@ namespace RRHH.WhatsApp.Infrastructure.Servicios;
 /// La persona aplicando a una vacante concreta: lo que recorre el kanban (Regla 13) y lo que hace
 /// posible la Regla 6, dos postulaciones independientes sobre un unico hilo de WhatsApp.
 /// </summary>
-public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionService> log) : IPostulacionService
+public sealed class PostulacionService(RrhhDbContext db, TimeProvider reloj, ILogger<PostulacionService> log)
+    : IPostulacionService
 {
     public async Task<Postulacion> CrearAsync(int postulanteId, int hcId, CancellationToken ct = default)
     {
@@ -25,7 +26,7 @@ public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionServ
 
         if (existente is not null)
         {
-            existente.FechaUltimaActividad = DateTime.UtcNow;
+            existente.FechaUltimaActividad = reloj.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(ct);
 
             return existente;
@@ -37,7 +38,7 @@ public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionServ
             .Select(ac => (int?)ac.AnalistaId)
             .FirstOrDefaultAsync(ct);
 
-        var ahora = DateTime.UtcNow;
+        var ahora = reloj.GetUtcNow().UtcDateTime;
 
         var postulacion = new Postulacion
         {
@@ -68,7 +69,7 @@ public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionServ
             ?? throw new InvalidOperationException($"No existe la etapa {etapaId}.");
 
         var anterior = postulacion.EtapaKanbanId;
-        var ahora = DateTime.UtcNow;
+        var ahora = reloj.GetUtcNow().UtcDateTime;
 
         postulacion.EtapaKanbanId = etapaId;
         postulacion.FechaCambioEtapa = ahora;
@@ -111,6 +112,10 @@ public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionServ
         if (tipo == TipoEstadoPostulante.Blacklist && string.IsNullOrWhiteSpace(motivo))
             throw new InvalidOperationException("El motivo es obligatorio para marcar blacklist.");
 
+        // Un solo instante para toda la operacion: la marca, la auditoria y el descarte en cascada
+        // de mas abajo son un mismo hecho de negocio.
+        var ahora = reloj.GetUtcNow().UtcDateTime;
+
         db.EstadosPostulanteCuenta.Add(new EstadoPostulanteCuenta
         {
             PostulanteId = postulanteId,
@@ -118,7 +123,7 @@ public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionServ
             Tipo = tipo,
             Motivo = motivo,
             AnalistaId = analistaId,
-            Fecha = DateTime.UtcNow
+            Fecha = ahora
         });
 
         db.Auditorias.Add(new Auditoria
@@ -128,7 +133,7 @@ public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionServ
             AnalistaId = analistaId,
             Accion = tipo.ToString(),
             Detalle = motivo,
-            Fecha = DateTime.UtcNow
+            Fecha = ahora
         });
 
         var descartadas = new List<int>();
@@ -149,12 +154,12 @@ public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionServ
             foreach (var postulacion in vigentes)
             {
                 postulacion.Estado = EstadoPostulacion.Descartado;
-                postulacion.FechaUltimaActividad = DateTime.UtcNow;
+                postulacion.FechaUltimaActividad = ahora;
 
                 if (etapaDescartado is { } etapaId)
                 {
                     postulacion.EtapaKanbanId = etapaId;
-                    postulacion.FechaCambioEtapa = DateTime.UtcNow;
+                    postulacion.FechaCambioEtapa = ahora;
                 }
 
                 descartadas.Add(postulacion.PostulacionId);
@@ -230,7 +235,7 @@ public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionServ
             .Select(e => e.EtapaId)
             .FirstAsync(ct);
 
-    private static Auditoria Auditar(int postulacionId, int? analistaId, string accion, string? detalle) =>
+    private Auditoria Auditar(int postulacionId, int? analistaId, string accion, string? detalle) =>
         new()
         {
             EntidadTipo = nameof(Postulacion),
@@ -238,6 +243,6 @@ public sealed class PostulacionService(RrhhDbContext db, ILogger<PostulacionServ
             AnalistaId = analistaId,
             Accion = accion,
             Detalle = detalle,
-            Fecha = DateTime.UtcNow
+            Fecha = reloj.GetUtcNow().UtcDateTime
         };
 }

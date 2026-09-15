@@ -30,8 +30,8 @@ public class EnvioFallidoTests : IDisposable
         _db = new RrhhDbContext(opciones);
         _db.Database.EnsureCreated();
 
-        _mensajes = new MensajeService(_db, NullLogger<MensajeService>.Instance);
-        _conversaciones = new ConversacionService(_db, NullLogger<ConversacionService>.Instance);
+        _mensajes = new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance);
+        _conversaciones = new ConversacionService(_db, TimeProvider.System, NullLogger<ConversacionService>.Instance);
     }
 
     private async Task<long> CrearSalienteSinIdDeProveedorAsync()

@@ -31,6 +31,11 @@ public static class RegistroDependencias
         servicios.AddDbContext<RrhhDbContext>(opciones => opciones.UseSqlServer(cadena));
         servicios.AddMemoryCache();
 
+        // ARQ-01: sin reloj inyectable los barridos por tiempo (R2, R9, R16) no se pueden probar de
+        // punta a punta, y por eso se escaparon C1 y AL10. TryAdd para que un host de pruebas pueda
+        // registrar otro reloj (por ejemplo un FakeTimeProvider) antes de llamar a este metodo.
+        servicios.TryAddSingleton(TimeProvider.System);
+
         servicios.Configure<OpcionesCv>(configuracion.GetSection(OpcionesCv.Seccion));
         servicios.Configure<OpcionesAntivirus>(configuracion.GetSection(OpcionesAntivirus.Seccion));
         servicios.AddScoped<IAlmacenamientoCv, AlmacenamientoCvLocal>();
@@ -127,10 +132,6 @@ public static class RegistroDependencias
         var meta = seccionMeta.Get<OpcionesMetaCloud>() ?? new OpcionesMetaCloud();
         var dialog = seccion360.Get<Dialog360Opciones>() ?? new Dialog360Opciones();
 
-        // T0.08 registrara TimeProvider formalmente para toda la Infrastructure; TryAdd evita
-        // pisarlo si ese registro ya corrio (o corre despues) en el mismo contenedor.
-        servicios.TryAddSingleton(TimeProvider.System);
-
         // Respaldo de appsettings para cuando envio.maximo_por_segundo no se puede leer de la
         // base (COR-12/AL8): el de quien haya quedado configurado, Meta o 360dialog.
         var maximoPorSegundoDeRespaldo = meta.EstaConfigurado ? meta.MaximoPorSegundo : dialog.MaximoPorSegundo;
@@ -172,6 +173,7 @@ public static class RegistroDependencias
         if (!dialog.EstaConfigurado)
         {
             servicios.AddScoped<IWhatsAppProvider>(sp => new ProveedorSimulado(
+                sp.GetRequiredService<TimeProvider>(),
                 sp.GetRequiredService<ILogger<ProveedorSimulado>>(),
                 dialog.SecretoWebhook));
 

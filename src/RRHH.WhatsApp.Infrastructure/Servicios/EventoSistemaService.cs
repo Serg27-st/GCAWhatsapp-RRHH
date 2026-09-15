@@ -13,7 +13,8 @@ namespace RRHH.WhatsApp.Infrastructure.Servicios;
 /// permite cumplir el limite de 5 segundos que 360dialog da para responder 200 sin acoplar la
 /// ingesta a la velocidad del motor de reglas.
 /// </summary>
-public sealed class EventoSistemaService(RrhhDbContext db, ILogger<EventoSistemaService> log) : IEventoSistemaService
+public sealed class EventoSistemaService(RrhhDbContext db, TimeProvider reloj, ILogger<EventoSistemaService> log)
+    : IEventoSistemaService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -25,7 +26,7 @@ public sealed class EventoSistemaService(RrhhDbContext db, ILogger<EventoSistema
             Payload = JsonSerializer.Serialize(payload, Json),
             Estado = EstadoEvento.Pendiente,
             CorrelationId = correlationId,
-            FechaCreacion = DateTime.UtcNow
+            FechaCreacion = reloj.GetUtcNow().UtcDateTime
         });
 
         await db.SaveChangesAsync(ct);
@@ -55,7 +56,7 @@ public sealed class EventoSistemaService(RrhhDbContext db, ILogger<EventoSistema
         var evento = await db.EventosSistema.FirstAsync(e => e.EventoId == eventoId, ct);
 
         evento.Estado = EstadoEvento.Procesado;
-        evento.FechaProcesado = DateTime.UtcNow;
+        evento.FechaProcesado = reloj.GetUtcNow().UtcDateTime;
 
         await db.SaveChangesAsync(ct);
     }

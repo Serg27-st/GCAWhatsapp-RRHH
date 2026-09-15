@@ -17,6 +17,7 @@ namespace RRHH.WhatsApp.Infrastructure.Servicios;
 /// </summary>
 public sealed class AutenticacionService(
     RrhhDbContext db,
+    TimeProvider reloj,
     ILogger<AutenticacionService> log) : IAutenticacionService
 {
     private const int TamanoSal = 16;
@@ -70,7 +71,7 @@ public sealed class AutenticacionService(
             ?? throw new InvalidOperationException($"No existe el analista {analistaId}.");
 
         analista.HashContrasena = Hashear(contrasena);
-        analista.FechaContrasena = DateTime.UtcNow;
+        analista.FechaContrasena = reloj.GetUtcNow().UtcDateTime;
 
         await db.SaveChangesAsync(ct);
 

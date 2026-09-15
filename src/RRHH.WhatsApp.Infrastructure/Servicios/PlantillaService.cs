@@ -10,7 +10,8 @@ namespace RRHH.WhatsApp.Infrastructure.Servicios;
 /// Resuelve que plantilla aprobada usar y si la ventana de servicio sigue abierta.
 /// Sin esta pieza, las Reglas 3, 9, 12 y 15 no tienen quien las ejecute.
 /// </summary>
-public sealed class PlantillaService(RrhhDbContext db, ILogger<PlantillaService> log) : IPlantillaService
+public sealed class PlantillaService(RrhhDbContext db, TimeProvider reloj, ILogger<PlantillaService> log)
+    : IPlantillaService
 {
     /// <summary>Duracion de la ventana de servicio de WhatsApp, medida desde el ultimo mensaje entrante.</summary>
     public static readonly TimeSpan VentanaServicio = TimeSpan.FromHours(24);
@@ -54,7 +55,7 @@ public sealed class PlantillaService(RrhhDbContext db, ILogger<PlantillaService>
         if (ultimoEntrante is not { } ultimo)
             return false;
 
-        return DateTime.UtcNow - ultimo < VentanaServicio;
+        return reloj.GetUtcNow().UtcDateTime - ultimo < VentanaServicio;
     }
 
     public async Task<IReadOnlyList<Plantilla>> ListarActivasAsync(CancellationToken ct = default) =>

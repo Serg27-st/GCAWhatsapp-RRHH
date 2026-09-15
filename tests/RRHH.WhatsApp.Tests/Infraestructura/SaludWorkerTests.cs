@@ -30,7 +30,7 @@ public class SaludWorkerTests : IDisposable
 
         _db.Database.EnsureCreated();
 
-        _latidos = new LatidoServicioService(_db);
+        _latidos = new LatidoServicioService(_db, TimeProvider.System);
         _chequeo = new ChequeoWorker(_latidos);
     }
 

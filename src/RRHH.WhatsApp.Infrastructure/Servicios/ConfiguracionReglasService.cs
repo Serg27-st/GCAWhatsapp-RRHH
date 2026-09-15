@@ -11,7 +11,8 @@ namespace RRHH.WhatsApp.Infrastructure.Servicios;
 /// los pide en cada evaluacion, y cambian una vez cada varios meses; la ventana corta hace que un
 /// ajuste desde la administracion se note casi de inmediato sin reiniciar nada.
 /// </summary>
-public sealed class ConfiguracionReglasService(RrhhDbContext db, IMemoryCache cache) : IConfiguracionReglasService
+public sealed class ConfiguracionReglasService(RrhhDbContext db, IMemoryCache cache, TimeProvider reloj)
+    : IConfiguracionReglasService
 {
     private const string ClaveCache = "configuracion-reglas";
     private static readonly TimeSpan Vigencia = TimeSpan.FromSeconds(30);
@@ -47,13 +48,13 @@ public sealed class ConfiguracionReglasService(RrhhDbContext db, IMemoryCache ca
             {
                 Clave = clave,
                 Valor = valor,
-                FechaActualizacion = DateTime.UtcNow
+                FechaActualizacion = reloj.GetUtcNow().UtcDateTime
             });
         }
         else
         {
             existente.Valor = valor;
-            existente.FechaActualizacion = DateTime.UtcNow;
+            existente.FechaActualizacion = reloj.GetUtcNow().UtcDateTime;
         }
 
         await db.SaveChangesAsync(ct);

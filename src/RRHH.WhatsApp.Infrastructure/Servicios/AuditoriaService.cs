@@ -5,7 +5,7 @@ using RRHH.WhatsApp.Infrastructure.Persistencia;
 
 namespace RRHH.WhatsApp.Infrastructure.Servicios;
 
-public sealed class AuditoriaService(RrhhDbContext db) : IAuditoriaService
+public sealed class AuditoriaService(RrhhDbContext db, TimeProvider reloj) : IAuditoriaService
 {
     public async Task RegistrarAsync(
         string entidadTipo, string entidadId, int? analistaId,
@@ -18,7 +18,7 @@ public sealed class AuditoriaService(RrhhDbContext db) : IAuditoriaService
             AnalistaId = analistaId,
             Accion = accion,
             Detalle = detalle is { Length: > 2000 } ? detalle[..2000] : detalle,
-            Fecha = DateTime.UtcNow
+            Fecha = reloj.GetUtcNow().UtcDateTime
         });
 
         await db.SaveChangesAsync(ct);

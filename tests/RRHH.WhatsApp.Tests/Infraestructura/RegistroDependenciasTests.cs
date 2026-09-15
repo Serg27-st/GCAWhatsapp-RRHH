@@ -114,4 +114,44 @@ public class RegistroDependenciasTests
 
         Assert.Equal(prioridades.Count, prioridades.Distinct().Count());
     }
+
+    /// <summary>Reloj fijo, solo para probar que <c>TryAddSingleton</c> respeta un registro previo.</summary>
+    private sealed class RelojFijoDePrueba(DateTimeOffset instante) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => instante;
+    }
+
+    /// <summary>
+    /// ARQ-01: <c>AgregarInfraestructura</c> usa <c>TryAddSingleton</c> para el reloj justamente
+    /// para que un host de pruebas (o T0.10, con un <c>FakeTimeProvider</c>) pueda imponer el suyo
+    /// antes de cablear la Infrastructure. Si esto se rompe, todos los servicios vuelven a leer el
+    /// reloj real sin que ninguna prueba lo note.
+    /// </summary>
+    [Fact]
+    public void Un_reloj_propio_registrado_antes_es_el_que_usan_los_servicios()
+    {
+        var configuracion = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:RrhhWhatsApp"] = "Server=(local);Database=Prueba;Trusted_Connection=True"
+            })
+            .Build();
+
+        var relojFijo = new RelojFijoDePrueba(new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero));
+
+        var servicios = new ServiceCollection();
+        servicios.AddLogging();
+        servicios.AddSingleton<TimeProvider>(relojFijo);
+        servicios.AgregarInfraestructura(configuracion);
+
+        using var proveedor = servicios.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateOnBuild = true,
+            ValidateScopes = true
+        });
+
+        using var ambito = proveedor.CreateScope();
+
+        Assert.Same(relojFijo, ambito.ServiceProvider.GetRequiredService<TimeProvider>());
+    }
 }

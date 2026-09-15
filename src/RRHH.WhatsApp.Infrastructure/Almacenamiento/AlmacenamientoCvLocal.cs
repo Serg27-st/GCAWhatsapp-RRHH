@@ -12,6 +12,7 @@ namespace RRHH.WhatsApp.Infrastructure.Almacenamiento;
 public sealed class AlmacenamientoCvLocal(
     IOptions<OpcionesCv> opciones,
     IEscanerAntivirus antivirus,
+    TimeProvider reloj,
     ILogger<AlmacenamientoCvLocal> log) : IAlmacenamientoCv
 {
     /// <summary>Tamano de bloque al copiar. El tope se controla contando lo copiado, no de una vez.</summary>
@@ -40,7 +41,7 @@ public sealed class AlmacenamientoCvLocal(
         // Se reparte por mes para que la carpeta no termine con decenas de miles de archivos
         // sueltos, que es lo que vuelve lenta la purga de la Regla 17.
         var relativa = Path.Combine(
-            DateTime.UtcNow.ToString("yyyy-MM"),
+            reloj.GetUtcNow().UtcDateTime.ToString("yyyy-MM"),
             $"{Guid.NewGuid():N}{extension}");
 
         var absoluta = Path.Combine(_opciones.Carpeta, relativa);

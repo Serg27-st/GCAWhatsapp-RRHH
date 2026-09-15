@@ -59,7 +59,7 @@ public class DifusorNotificacionesTests : IDisposable
 
         _db.Database.EnsureCreated();
 
-        _eventos = new EventoSistemaService(_db, NullLogger<EventoSistemaService>.Instance);
+        _eventos = new EventoSistemaService(_db, TimeProvider.System, NullLogger<EventoSistemaService>.Instance);
 
         var servicios = new ServiceCollection();
         servicios.AddScoped(_ => _eventos);

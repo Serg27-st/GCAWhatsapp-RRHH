@@ -5,7 +5,7 @@ using RRHH.WhatsApp.Infrastructure.Persistencia;
 
 namespace RRHH.WhatsApp.Infrastructure.Servicios;
 
-public sealed class LatidoServicioService(RrhhDbContext db) : ILatidoServicio
+public sealed class LatidoServicioService(RrhhDbContext db, TimeProvider reloj) : ILatidoServicio
 {
     public async Task RegistrarAsync(
         string servicio, TimeSpan tolerancia, string? detalle = null, CancellationToken ct = default)
@@ -18,7 +18,7 @@ public sealed class LatidoServicioService(RrhhDbContext db) : ILatidoServicio
             db.LatidosServicio.Add(latido);
         }
 
-        latido.FechaUtc = DateTime.UtcNow;
+        latido.FechaUtc = reloj.GetUtcNow().UtcDateTime;
         latido.ToleranciaSegundos = (int)tolerancia.TotalSeconds;
         latido.Detalle = detalle;
 

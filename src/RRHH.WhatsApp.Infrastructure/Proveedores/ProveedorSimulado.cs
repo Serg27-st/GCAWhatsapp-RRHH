@@ -13,7 +13,8 @@ namespace RRHH.WhatsApp.Infrastructure.Proveedores;
 /// el codigo que corre en produccion.
 /// </para>
 /// </summary>
-public sealed class ProveedorSimulado(ILogger<ProveedorSimulado> log, string? secretoWebhook = null) : IWhatsAppProvider
+public sealed class ProveedorSimulado(
+    TimeProvider reloj, ILogger<ProveedorSimulado> log, string? secretoWebhook = null) : IWhatsAppProvider
 {
     /// <summary>Todo lo "enviado" queda aca para poder revisarlo desde las pruebas.</summary>
     public List<EnvioSimulado> Enviados { get; } = [];
@@ -92,10 +93,10 @@ public sealed class ProveedorSimulado(ILogger<ProveedorSimulado> log, string? se
     }
 
     public IReadOnlyList<MensajeEntranteDto> InterpretarWebhook(string cuerpoCrudo) =>
-        InterpreteWebhookMeta.Mensajes(cuerpoCrudo, log);
+        InterpreteWebhookMeta.Mensajes(cuerpoCrudo, reloj.GetUtcNow().UtcDateTime, log);
 
     public IReadOnlyList<EstadoEntregaDto> InterpretarEstados(string cuerpoCrudo) =>
-        InterpreteWebhookMeta.Estados(cuerpoCrudo, log);
+        InterpreteWebhookMeta.Estados(cuerpoCrudo, reloj.GetUtcNow().UtcDateTime, log);
 }
 
 public sealed record EnvioSimulado(string Telefono, string Tipo, string Detalle);

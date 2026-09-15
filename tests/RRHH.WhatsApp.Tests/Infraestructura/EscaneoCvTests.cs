@@ -38,6 +38,7 @@ public class EscaneoCvTests : IDisposable
                 Antivirus = new OpcionesAntivirus { ExigirEscaneo = exigir }
             }),
             escaner,
+            TimeProvider.System,
             NullLogger<AlmacenamientoCvLocal>.Instance);
 
     private static MemoryStream Cv() => new(Encoding.UTF8.GetBytes("%PDF-1.4 cv"));

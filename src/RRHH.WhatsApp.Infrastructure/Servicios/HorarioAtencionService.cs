@@ -10,7 +10,7 @@ namespace RRHH.WhatsApp.Infrastructure.Servicios;
 /// Regla 3 y apoyo a la Regla 2. Resuelve el horario laboral configurado, que puede ser propio de
 /// una cuenta o general para toda la operacion.
 /// </summary>
-public sealed class HorarioAtencionService(RrhhDbContext db, ILogger<HorarioAtencionService> log)
+public sealed class HorarioAtencionService(RrhhDbContext db, TimeProvider reloj, ILogger<HorarioAtencionService> log)
     : IHorarioAtencionService
 {
     /// <summary>
@@ -98,7 +98,7 @@ public sealed class HorarioAtencionService(RrhhDbContext db, ILogger<HorarioAten
             AnalistaId = analistaId,
             Accion = "HorarioActualizado",
             Detalle = $"{tramos.Count} tramo(s).",
-            Fecha = DateTime.UtcNow
+            Fecha = reloj.GetUtcNow().UtcDateTime
         });
 
         await db.SaveChangesAsync(ct);

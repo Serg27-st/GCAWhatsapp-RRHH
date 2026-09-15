@@ -26,7 +26,7 @@ public class AsignacionCuentasSqlServerTests
 
         await using var transaccion = await db.Database.BeginTransactionAsync();
 
-        var cuentas = new CuentaService(db);
+        var cuentas = new CuentaService(db, TimeProvider.System);
         var analistas = new AnalistaService(db);
         var sufijo = Guid.NewGuid().ToString("N")[..8];
 

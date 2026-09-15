@@ -16,6 +16,7 @@ public sealed class JobFormsService(
     RrhhDbContext db,
     IAlmacenamientoCv almacenamiento,
     IConfiguracionReglasService configuracion,
+    TimeProvider reloj,
     ILogger<JobFormsService> log) : IJobFormsService
 {
     public async Task<JobFormsRespuesta> ValidarEnvioAsync(
@@ -41,8 +42,12 @@ public sealed class JobFormsService(
         respuesta.VersionAvisoPrivacidad = config.TryGetValue(
             ClavesConfiguracion.VersionAvisoPrivacidad, out var version) ? version : null;
 
-        respuesta.FechaConsentimiento = DateTime.UtcNow;
-        respuesta.FechaEnvio = DateTime.UtcNow;
+        // Un solo instante para ambas fechas: el consentimiento y el envio pasan en la misma
+        // operacion, y no hay razon para que difieran.
+        var ahora = reloj.GetUtcNow().UtcDateTime;
+
+        respuesta.FechaConsentimiento = ahora;
+        respuesta.FechaEnvio = ahora;
 
         db.JobFormsRespuestas.Add(respuesta);
 
@@ -77,7 +82,7 @@ public sealed class JobFormsService(
     public async Task<IReadOnlyList<JobFormsRespuesta>> ListarCvsPorPurgarAsync(
         int diasRetencion, int maximo, CancellationToken ct = default)
     {
-        var limite = DateTime.UtcNow.AddDays(-diasRetencion);
+        var limite = reloj.GetUtcNow().UtcDateTime.AddDays(-diasRetencion);
 
         return await db.JobFormsRespuestas
             .AsNoTracking()
@@ -115,7 +120,7 @@ public sealed class JobFormsService(
             EntidadId = respuestaId.ToString(),
             Accion = "PurgaCv",
             Detalle = "Retencion cumplida (Regla 17).",
-            Fecha = DateTime.UtcNow
+            Fecha = reloj.GetUtcNow().UtcDateTime
         });
 
         await db.SaveChangesAsync(ct);

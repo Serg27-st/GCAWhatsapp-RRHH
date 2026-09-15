@@ -11,7 +11,7 @@ namespace RRHH.WhatsApp.Infrastructure.Servicios;
 /// enlace y no lo completo, que es lo unico que hace posible el recordatorio de 24h y el aviso al
 /// analista de 48h.
 /// </summary>
-public sealed class JobFormsInvitacionService(RrhhDbContext db, ILogger<JobFormsInvitacionService> log)
+public sealed class JobFormsInvitacionService(RrhhDbContext db, TimeProvider reloj, ILogger<JobFormsInvitacionService> log)
     : IJobFormsInvitacionService
 {
     public async Task<JobFormsInvitacion> CrearInvitacionAsync(
@@ -41,7 +41,7 @@ public sealed class JobFormsInvitacionService(RrhhDbContext db, ILogger<JobForms
             PostulanteId = conversacion.PostulanteId,
             HcId = hcId,
             Token = Guid.NewGuid(),
-            FechaEnvioLink = DateTime.UtcNow
+            FechaEnvioLink = reloj.GetUtcNow().UtcDateTime
         };
 
         db.JobFormsInvitaciones.Add(invitacion);
@@ -60,27 +60,27 @@ public sealed class JobFormsInvitacionService(RrhhDbContext db, ILogger<JobForms
         SellarAsync(invitacionId, i =>
         {
             i.RecordatorioEnviado = true;
-            i.FechaRecordatorio = DateTime.UtcNow;
+            i.FechaRecordatorio = reloj.GetUtcNow().UtcDateTime;
         }, ct);
 
     public Task MarcarAvisoAnalistaEnviadoAsync(int invitacionId, CancellationToken ct = default) =>
         SellarAsync(invitacionId, i =>
         {
             i.AvisoAnalistaEnviado = true;
-            i.FechaAvisoAnalista = DateTime.UtcNow;
+            i.FechaAvisoAnalista = reloj.GetUtcNow().UtcDateTime;
         }, ct);
 
     public Task MarcarCompletadoAsync(int invitacionId, CancellationToken ct = default) =>
         SellarAsync(invitacionId, i =>
         {
             i.Completado = true;
-            i.FechaCompletado = DateTime.UtcNow;
+            i.FechaCompletado = reloj.GetUtcNow().UtcDateTime;
         }, ct);
 
     public async Task<IReadOnlyList<JobFormsInvitacion>> ListarPendientesRecordatorioAsync(
         TimeSpan antiguedad, CancellationToken ct = default)
     {
-        var limite = DateTime.UtcNow - antiguedad;
+        var limite = reloj.GetUtcNow().UtcDateTime - antiguedad;
 
         return await db.JobFormsInvitaciones
             .AsNoTracking()
@@ -93,7 +93,7 @@ public sealed class JobFormsInvitacionService(RrhhDbContext db, ILogger<JobForms
     public async Task<IReadOnlyList<JobFormsInvitacion>> ListarPendientesAvisoAnalistaAsync(
         TimeSpan antiguedad, CancellationToken ct = default)
     {
-        var limite = DateTime.UtcNow - antiguedad;
+        var limite = reloj.GetUtcNow().UtcDateTime - antiguedad;
 
         return await db.JobFormsInvitaciones
             .AsNoTracking()

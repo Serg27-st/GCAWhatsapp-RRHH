@@ -24,7 +24,7 @@ public class HorarioAtencionServiceTests : IDisposable
         _db = new RrhhDbContext(opciones);
         _db.Database.EnsureCreated();
 
-        _servicio = new HorarioAtencionService(_db, NullLogger<HorarioAtencionService>.Instance);
+        _servicio = new HorarioAtencionService(_db, TimeProvider.System, NullLogger<HorarioAtencionService>.Instance);
     }
 
     private static HorarioAtencion Tramo(DayOfWeek dia, string inicio, string fin, int? cuentaId = null) =>

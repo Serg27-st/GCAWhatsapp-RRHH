@@ -29,6 +29,7 @@ public class MetaCloudProviderTests
                 AccessToken = "token"
             }),
             new LimitadorEnvio(10),
+            TimeProvider.System,
             NullLogger<MetaCloudProvider>.Instance);
 
     /// <summary>Igual que <see cref="Proveedor"/>, pero con un handler falso en vez de red real.</summary>
@@ -41,6 +42,7 @@ public class MetaCloudProviderTests
                 AccessToken = "token"
             }),
             new LimitadorEnvio(10),
+            TimeProvider.System,
             NullLogger<MetaCloudProvider>.Instance);
 
     private static Dictionary<string, string> ConFirma(string cuerpo, string secreto) =>

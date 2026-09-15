@@ -13,6 +13,7 @@ namespace RRHH.WhatsApp.Infrastructure.Servicios;
 public sealed class PostulanteService(
     RrhhDbContext db,
     IAlmacenamientoCv almacenamiento,
+    TimeProvider reloj,
     ILogger<PostulanteService> log) : IPostulanteService
 {
     public Task<Postulante?> BuscarPorDniAsync(string dni, CancellationToken ct = default) =>
@@ -35,7 +36,7 @@ public sealed class PostulanteService(
                 NombreCompleto = datos.NombreCompleto,
                 TelefonoUltimo = datos.TelefonoE164,
                 Email = datos.Email,
-                FechaRegistro = DateTime.UtcNow
+                FechaRegistro = reloj.GetUtcNow().UtcDateTime
             };
 
             db.Postulantes.Add(postulante);
@@ -109,7 +110,7 @@ public sealed class PostulanteService(
             EntidadId = id.ToString(),
             Accion = "AnonimizacionDatos",
             Detalle = motivo,
-            Fecha = DateTime.UtcNow
+            Fecha = reloj.GetUtcNow().UtcDateTime
         });
 
         await db.SaveChangesAsync(ct);

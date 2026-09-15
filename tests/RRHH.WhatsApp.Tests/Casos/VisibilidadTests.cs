@@ -35,7 +35,7 @@ public class VisibilidadTests : IDisposable
 
         _entorno.Db.SaveChanges();
 
-        _cuentas = new CuentaService(_entorno.Db);
+        _cuentas = new CuentaService(_entorno.Db, TimeProvider.System);
     }
 
     private async Task<int> ConversacionAsignadaAsync()

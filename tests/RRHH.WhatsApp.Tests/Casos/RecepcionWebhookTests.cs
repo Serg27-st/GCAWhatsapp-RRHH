@@ -33,13 +33,13 @@ public class RecepcionWebhookTests : IDisposable
         _db = new RrhhDbContext(opciones);
         _db.Database.EnsureCreated();
 
-        _proveedor = new ProveedorSimulado(NullLogger<ProveedorSimulado>.Instance);
+        _proveedor = new ProveedorSimulado(TimeProvider.System, NullLogger<ProveedorSimulado>.Instance);
 
         _recepcion = new RecepcionWebhook(
             _proveedor,
-            new ConversacionService(_db, NullLogger<ConversacionService>.Instance),
-            new MensajeService(_db, NullLogger<MensajeService>.Instance),
-            new EventoSistemaService(_db, NullLogger<EventoSistemaService>.Instance),
+            new ConversacionService(_db, TimeProvider.System, NullLogger<ConversacionService>.Instance),
+            new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance),
+            new EventoSistemaService(_db, TimeProvider.System, NullLogger<EventoSistemaService>.Instance),
             NullLogger<RecepcionWebhook>.Instance);
     }
 
@@ -166,13 +166,14 @@ public class RecepcionWebhookTests : IDisposable
     [Fact]
     public async Task Rechaza_el_payload_cuando_la_firma_no_valida()
     {
-        var proveedorConSecreto = new ProveedorSimulado(NullLogger<ProveedorSimulado>.Instance, "secreto");
+        var proveedorConSecreto = new ProveedorSimulado(
+            TimeProvider.System, NullLogger<ProveedorSimulado>.Instance, "secreto");
 
         var recepcion = new RecepcionWebhook(
             proveedorConSecreto,
-            new ConversacionService(_db, NullLogger<ConversacionService>.Instance),
-            new MensajeService(_db, NullLogger<MensajeService>.Instance),
-            new EventoSistemaService(_db, NullLogger<EventoSistemaService>.Instance),
+            new ConversacionService(_db, TimeProvider.System, NullLogger<ConversacionService>.Instance),
+            new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance),
+            new EventoSistemaService(_db, TimeProvider.System, NullLogger<EventoSistemaService>.Instance),
             NullLogger<RecepcionWebhook>.Instance);
 
         var resultado = await recepcion.ProcesarAsync(
@@ -189,10 +190,11 @@ public class RecepcionWebhookTests : IDisposable
     [Fact]
     public async Task Un_acuse_de_entrega_actualiza_el_mensaje_saliente()
     {
-        var conversacion = await new ConversacionService(_db, NullLogger<ConversacionService>.Instance)
+        var conversacion = await new ConversacionService(
+                _db, TimeProvider.System, NullLogger<ConversacionService>.Instance)
             .ObtenerOCrearAsync("+51987654321");
 
-        var mensajes = new MensajeService(_db, NullLogger<MensajeService>.Instance);
+        var mensajes = new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance);
 
         await mensajes.RegistrarSalienteAsync(
             conversacion.ConversacionId, "Hola", null, null, "wamid.SALIENTE1", Guid.NewGuid());
@@ -206,10 +208,11 @@ public class RecepcionWebhookTests : IDisposable
     [Fact]
     public async Task Un_acuse_fallido_guarda_el_error_del_proveedor()
     {
-        var conversacion = await new ConversacionService(_db, NullLogger<ConversacionService>.Instance)
+        var conversacion = await new ConversacionService(
+                _db, TimeProvider.System, NullLogger<ConversacionService>.Instance)
             .ObtenerOCrearAsync("+51987654321");
 
-        var mensajes = new MensajeService(_db, NullLogger<MensajeService>.Instance);
+        var mensajes = new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance);
 
         await mensajes.RegistrarSalienteAsync(
             conversacion.ConversacionId, "Hola", null, null, "wamid.SALIENTE2", Guid.NewGuid());

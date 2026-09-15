@@ -23,6 +23,7 @@ public sealed class MetaCloudProvider(
     HttpClient http,
     IOptions<OpcionesMetaCloud> opciones,
     LimitadorEnvio limitador,
+    TimeProvider reloj,
     ILogger<MetaCloudProvider> log) : IWhatsAppProvider
 {
     /// <summary>Cabecera con la que Meta firma el cuerpo del webhook.</summary>
@@ -84,10 +85,10 @@ public sealed class MetaCloudProvider(
     }
 
     public IReadOnlyList<MensajeEntranteDto> InterpretarWebhook(string cuerpoCrudo) =>
-        InterpreteWebhookMeta.Mensajes(cuerpoCrudo, log);
+        InterpreteWebhookMeta.Mensajes(cuerpoCrudo, reloj.GetUtcNow().UtcDateTime, log);
 
     public IReadOnlyList<EstadoEntregaDto> InterpretarEstados(string cuerpoCrudo) =>
-        InterpreteWebhookMeta.Estados(cuerpoCrudo, log);
+        InterpreteWebhookMeta.Estados(cuerpoCrudo, reloj.GetUtcNow().UtcDateTime, log);
 
     public Task<ResultadoEnvio> EnviarTextoAsync(
         string telefonoE164, string texto, CancellationToken ct = default) =>

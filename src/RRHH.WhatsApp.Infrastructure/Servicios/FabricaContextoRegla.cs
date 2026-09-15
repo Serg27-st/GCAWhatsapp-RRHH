@@ -12,12 +12,13 @@ public sealed class FabricaContextoRegla(
     RrhhDbContext db,
     IConfiguracionReglasService configuracion,
     IHorarioAtencionService horarios,
-    IAusenciaService ausencias) : IFabricaContextoRegla
+    IAusenciaService ausencias,
+    TimeProvider reloj) : IFabricaContextoRegla
 {
     public async Task<ContextoRegla> ParaMensajeEntranteAsync(
         int conversacionId, string? idBotonPulsado, Guid correlationId, CancellationToken ct = default)
     {
-        var ahora = DateTime.UtcNow;
+        var ahora = reloj.GetUtcNow().UtcDateTime;
         var conversacion = await CargarConversacionAsync(conversacionId, ct);
 
         // La vacante se carga sin filtrar por estado: que este cerrada es informacion, no ausencia
@@ -38,7 +39,7 @@ public sealed class FabricaContextoRegla(
 
     public async Task<ContextoRegla> ParaTiempoTranscurridoAsync(int conversacionId, CancellationToken ct = default)
     {
-        var ahora = DateTime.UtcNow;
+        var ahora = reloj.GetUtcNow().UtcDateTime;
         var conversacion = await CargarConversacionAsync(conversacionId, ct);
 
         return await ArmarAsync(
@@ -49,7 +50,7 @@ public sealed class FabricaContextoRegla(
     public async Task<ContextoRegla> ParaEnvioSalienteAsync(
         int conversacionId, Guid correlationId, CancellationToken ct = default)
     {
-        var ahora = DateTime.UtcNow;
+        var ahora = reloj.GetUtcNow().UtcDateTime;
         var conversacion = await CargarConversacionAsync(conversacionId, ct);
 
         return await ArmarAsync(
@@ -60,7 +61,7 @@ public sealed class FabricaContextoRegla(
     public async Task<ContextoRegla> ParaJobFormsCompletadoAsync(
         int conversacionId, int hcId, Guid correlationId, CancellationToken ct = default)
     {
-        var ahora = DateTime.UtcNow;
+        var ahora = reloj.GetUtcNow().UtcDateTime;
         var conversacion = await CargarConversacionAsync(conversacionId, ct);
         var hc = await CargarVacanteAsync(hcId, ct);
 
@@ -72,7 +73,7 @@ public sealed class FabricaContextoRegla(
     public async Task<ContextoRegla> ParaCambioEstadoPostulacionAsync(
         int postulacionId, Guid correlationId, CancellationToken ct = default)
     {
-        var ahora = DateTime.UtcNow;
+        var ahora = reloj.GetUtcNow().UtcDateTime;
 
         var postulacion = await db.Postulaciones
             .AsNoTracking()

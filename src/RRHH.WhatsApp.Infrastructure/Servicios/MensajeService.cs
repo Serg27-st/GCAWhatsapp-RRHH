@@ -8,7 +8,7 @@ using RRHH.WhatsApp.Infrastructure.Persistencia;
 
 namespace RRHH.WhatsApp.Infrastructure.Servicios;
 
-public sealed class MensajeService(RrhhDbContext db, ILogger<MensajeService> log) : IMensajeService
+public sealed class MensajeService(RrhhDbContext db, TimeProvider reloj, ILogger<MensajeService> log) : IMensajeService
 {
     public async Task<Mensaje?> RegistrarEntranteAsync(
         int conversacionId, MensajeEntranteDto dto, Guid correlationId, CancellationToken ct = default)
@@ -74,7 +74,7 @@ public sealed class MensajeService(RrhhDbContext db, ILogger<MensajeService> log
                 ? JsonSerializer.Serialize(parametrosPlantilla)
                 : null,
             AnalistaId = analistaId,
-            FechaEnvio = DateTime.UtcNow,
+            FechaEnvio = reloj.GetUtcNow().UtcDateTime,
             EstadoEntrega = providerMessageId is null ? EstadoEntrega.Pendiente : EstadoEntrega.Enviado,
             CorrelationId = correlationId
         };

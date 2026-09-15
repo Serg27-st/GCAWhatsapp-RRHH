@@ -26,7 +26,7 @@ public class AdministracionCuentasTests : IDisposable
 
         _db.Database.EnsureCreated();
 
-        _cuentas = new CuentaService(_db);
+        _cuentas = new CuentaService(_db, TimeProvider.System);
         _analistas = new AnalistaService(_db);
     }
 

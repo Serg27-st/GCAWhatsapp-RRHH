@@ -32,9 +32,9 @@ public class ReintentoEnviosTests : IDisposable
         _db = new RrhhDbContext(opciones);
         _db.Database.EnsureCreated();
 
-        _mensajes = new MensajeService(_db, NullLogger<MensajeService>.Instance);
-        _conversaciones = new ConversacionService(_db, NullLogger<ConversacionService>.Instance);
-        _plantillas = new PlantillaService(_db, NullLogger<PlantillaService>.Instance);
+        _mensajes = new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance);
+        _conversaciones = new ConversacionService(_db, TimeProvider.System, NullLogger<ConversacionService>.Instance);
+        _plantillas = new PlantillaService(_db, TimeProvider.System, NullLogger<PlantillaService>.Instance);
     }
 
     private ReintentoEnvios Crear() => new(

@@ -8,7 +8,8 @@ using RRHH.WhatsApp.Infrastructure.Persistencia;
 
 namespace RRHH.WhatsApp.Infrastructure.Servicios;
 
-public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionService> log) : IConversacionService
+public sealed class ConversacionService(RrhhDbContext db, TimeProvider reloj, ILogger<ConversacionService> log)
+    : IConversacionService
 {
     public async Task<Conversacion> ObtenerOCrearAsync(string telefonoE164, CancellationToken ct = default)
     {
@@ -18,7 +19,7 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
         if (existente is not null)
             return existente;
 
-        var ahora = DateTime.UtcNow;
+        var ahora = reloj.GetUtcNow().UtcDateTime;
 
         // Nace sin postulante y sin cuenta: cuando alguien escribe por primera vez solo tenemos su
         // telefono. El DNI llega con el JobForms y la cuenta la resuelve el menu del bot.
@@ -168,6 +169,10 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
         if (pendiente)
             throw new InvalidOperationException("Ya hay una transferencia pendiente de respuesta para esta conversacion.");
 
+        // Un solo instante para toda la operacion: la transferencia y el aviso que dispara nacen
+        // juntos, y no tiene sentido que difieran por microsegundos.
+        var ahora = reloj.GetUtcNow().UtcDateTime;
+
         var transferencia = new Transferencia
         {
             ConversacionId = conversacionId,
@@ -175,7 +180,7 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
             AnalistaDestinoId = analistaDestinoId,
             Urgente = urgente,
             Comentario = comentario,
-            Fecha = DateTime.UtcNow,
+            Fecha = ahora,
             // Una transferencia urgente se aplica sola; el resto espera la aceptacion del destino.
             Estado = urgente ? EstadoTransferencia.Aceptada : EstadoTransferencia.Pendiente
         };
@@ -206,7 +211,7 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
                 ConversacionId = conversacionId
             }),
             CorrelationId = Guid.NewGuid(),
-            FechaCreacion = DateTime.UtcNow
+            FechaCreacion = ahora
         });
 
         await db.SaveChangesAsync(ct);
@@ -232,8 +237,11 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
         if (transferencia.Estado != EstadoTransferencia.Pendiente)
             throw new InvalidOperationException("Esta transferencia ya fue respondida.");
 
+        // Un solo instante para la respuesta y el aviso que dispara, misma razon que en TransferirAsync.
+        var ahora = reloj.GetUtcNow().UtcDateTime;
+
         transferencia.Estado = aceptada ? EstadoTransferencia.Aceptada : EstadoTransferencia.Rechazada;
-        transferencia.FechaRespuesta = DateTime.UtcNow;
+        transferencia.FechaRespuesta = ahora;
 
         // Si se rechaza, la conversacion se queda con quien la tenia: el origen decide a quien
         // mas derivarla, siempre de uno en uno.
@@ -262,7 +270,7 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
                 transferencia.ConversacionId
             }),
             CorrelationId = Guid.NewGuid(),
-            FechaCreacion = DateTime.UtcNow
+            FechaCreacion = ahora
         });
 
         try
@@ -328,7 +336,7 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
             return;
 
         conversacion.PostulanteId = postulanteId;
-        conversacion.FechaUltimaActividad = DateTime.UtcNow;
+        conversacion.FechaUltimaActividad = reloj.GetUtcNow().UtcDateTime;
 
         db.Auditorias.Add(Auditar(nameof(Conversacion), conversacionId, null,
             "VinculoPostulante", $"Postulante {postulanteId} identificado por el formulario."));
@@ -343,7 +351,7 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
         if (conversacion.FechaOptIn is not null)
             return;
 
-        conversacion.FechaOptIn = DateTime.UtcNow;
+        conversacion.FechaOptIn = reloj.GetUtcNow().UtcDateTime;
         conversacion.OrigenOptIn = origen;
 
         await db.SaveChangesAsync(ct);
@@ -433,7 +441,7 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
     public async Task<IReadOnlyList<int>> ListarPendientesArchivadoAsync(
         int diasSinActividad, int maximo, CancellationToken ct = default)
     {
-        var limite = DateTime.UtcNow.AddDays(-diasSinActividad);
+        var limite = reloj.GetUtcNow().UtcDateTime.AddDays(-diasSinActividad);
 
         return await db.Conversaciones
             .AsNoTracking()
@@ -444,7 +452,7 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
             .ToListAsync(ct);
     }
 
-    private static Auditoria Auditar(string tipo, int id, int? analistaId, string accion, string? detalle) =>
+    private Auditoria Auditar(string tipo, int id, int? analistaId, string accion, string? detalle) =>
         new()
         {
             EntidadTipo = tipo,
@@ -452,6 +460,6 @@ public sealed class ConversacionService(RrhhDbContext db, ILogger<ConversacionSe
             AnalistaId = analistaId,
             Accion = accion,
             Detalle = detalle,
-            Fecha = DateTime.UtcNow
+            Fecha = reloj.GetUtcNow().UtcDateTime
         };
 }

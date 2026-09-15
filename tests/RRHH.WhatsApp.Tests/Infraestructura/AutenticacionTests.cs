@@ -41,7 +41,7 @@ public class AutenticacionTests : IDisposable
 
         _db.SaveChanges();
 
-        _auth = new AutenticacionService(_db, NullLogger<AutenticacionService>.Instance);
+        _auth = new AutenticacionService(_db, TimeProvider.System, NullLogger<AutenticacionService>.Instance);
     }
 
     [Fact]

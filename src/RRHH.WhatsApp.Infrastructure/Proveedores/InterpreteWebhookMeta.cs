@@ -14,7 +14,14 @@ public static class InterpreteWebhookMeta
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public static IReadOnlyList<MensajeEntranteDto> Mensajes(string cuerpoCrudo, ILogger? log = null)
+    /// <summary>
+    /// <paramref name="ahoraUtc"/> es el instante del reloj de quien llama (Meta, 360dialog o el
+    /// simulado), usado solo como respaldo cuando el timestamp del mensaje no viene o no se puede
+    /// interpretar (ARQ-01): esta clase es estatica y no tiene un <c>TimeProvider</c> propio que
+    /// inyectar.
+    /// </summary>
+    public static IReadOnlyList<MensajeEntranteDto> Mensajes(
+        string cuerpoCrudo, DateTime ahoraUtc, ILogger? log = null)
     {
         var resultado = new List<MensajeEntranteDto>();
 
@@ -43,14 +50,15 @@ public static class InterpreteWebhookMeta
                     NombrePerfil: nombres.GetValueOrDefault(mensaje.De),
                     Contenido: contenido,
                     IdBotonPulsado: idBoton,
-                    FechaUtc: LeerTimestamp(mensaje.Timestamp)));
+                    FechaUtc: LeerTimestamp(mensaje.Timestamp, ahoraUtc)));
             }
         }
 
         return resultado;
     }
 
-    public static IReadOnlyList<EstadoEntregaDto> Estados(string cuerpoCrudo, ILogger? log = null)
+    public static IReadOnlyList<EstadoEntregaDto> Estados(
+        string cuerpoCrudo, DateTime ahoraUtc, ILogger? log = null)
     {
         var resultado = new List<EstadoEntregaDto>();
 
@@ -71,7 +79,7 @@ public static class InterpreteWebhookMeta
                     Estado: estado.Estado,
                     CodigoError: error?.Codigo?.ToString(),
                     DescripcionError: error is null ? null : $"{error.Titulo} {error.Mensaje}".Trim(),
-                    FechaUtc: LeerTimestamp(estado.Timestamp)));
+                    FechaUtc: LeerTimestamp(estado.Timestamp, ahoraUtc)));
             }
         }
 
@@ -122,10 +130,10 @@ public static class InterpreteWebhookMeta
             _ => ($"[{mensaje.Tipo ?? "desconocido"}]", null)
         };
 
-    private static DateTime LeerTimestamp(string? unixSegundos) =>
+    private static DateTime LeerTimestamp(string? unixSegundos, DateTime ahoraUtc) =>
         long.TryParse(unixSegundos, out var segundos)
             ? DateTimeOffset.FromUnixTimeSeconds(segundos).UtcDateTime
-            : DateTime.UtcNow;
+            : ahoraUtc;
 
     /// <summary>Meta entrega el numero sin el signo. El dominio lo guarda en E.164.</summary>
     public static string NormalizarTelefono(string numero)

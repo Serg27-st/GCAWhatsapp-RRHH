@@ -55,37 +55,42 @@ internal sealed class EntornoDeReglas : IDisposable
 
         Sembrar();
 
-        Proveedor = new ProveedorSimulado(NullLogger<ProveedorSimulado>.Instance);
+        // T0.10 reemplazara TimeProvider.System por un FakeTimeProvider expuesto como Reloj; por
+        // ahora cada servicio recibe el reloj real, igual que en produccion.
+        var reloj = TimeProvider.System;
 
-        var configuracion = new ConfiguracionReglasService(Db, new MemoryCache(new MemoryCacheOptions()));
-        var horarios = new HorarioAtencionService(Db, NullLogger<HorarioAtencionService>.Instance);
+        Proveedor = new ProveedorSimulado(reloj, NullLogger<ProveedorSimulado>.Instance);
+
+        var configuracion = new ConfiguracionReglasService(Db, new MemoryCache(new MemoryCacheOptions()), reloj);
+        var horarios = new HorarioAtencionService(Db, reloj, NullLogger<HorarioAtencionService>.Instance);
         var ausencias = new AusenciaService(Db);
-        var cuentas = new CuentaService(Db);
+        var cuentas = new CuentaService(Db, reloj);
         Cuentas = cuentas;
-        var plantillas = new PlantillaService(Db, NullLogger<PlantillaService>.Instance);
-        var auditoria = new AuditoriaService(Db);
+        var plantillas = new PlantillaService(Db, reloj, NullLogger<PlantillaService>.Instance);
+        var auditoria = new AuditoriaService(Db, reloj);
 
-        Invitaciones = new JobFormsInvitacionService(Db, NullLogger<JobFormsInvitacionService>.Instance);
-        Postulaciones = new PostulacionService(Db, NullLogger<PostulacionService>.Instance);
+        Invitaciones = new JobFormsInvitacionService(Db, reloj, NullLogger<JobFormsInvitacionService>.Instance);
+        Postulaciones = new PostulacionService(Db, reloj, NullLogger<PostulacionService>.Instance);
 
         CarpetaCv = Path.Combine(Path.GetTempPath(), $"cv-prueba-{Guid.NewGuid():N}");
 
         var almacenamiento = new AlmacenamientoCvLocal(
             Options.Create(new OpcionesCv { Carpeta = CarpetaCv }),
             new EscanerDesactivado(NullLogger<EscanerDesactivado>.Instance),
+            reloj,
             NullLogger<AlmacenamientoCvLocal>.Instance);
 
-        Postulantes = new PostulanteService(Db, almacenamiento, NullLogger<PostulanteService>.Instance);
+        Postulantes = new PostulanteService(Db, almacenamiento, reloj, NullLogger<PostulanteService>.Instance);
 
         Formularios = new JobFormsService(
-            Db, almacenamiento, configuracion, NullLogger<JobFormsService>.Instance);
+            Db, almacenamiento, configuracion, reloj, NullLogger<JobFormsService>.Instance);
 
-        var mensajes = new MensajeService(Db, NullLogger<MensajeService>.Instance);
+        var mensajes = new MensajeService(Db, reloj, NullLogger<MensajeService>.Instance);
 
-        Conversaciones = new ConversacionService(Db, NullLogger<ConversacionService>.Instance);
-        Eventos = new EventoSistemaService(Db, NullLogger<EventoSistemaService>.Instance);
+        Conversaciones = new ConversacionService(Db, reloj, NullLogger<ConversacionService>.Instance);
+        Eventos = new EventoSistemaService(Db, reloj, NullLogger<EventoSistemaService>.Instance);
 
-        var fabrica = new FabricaContextoRegla(Db, configuracion, horarios, ausencias);
+        var fabrica = new FabricaContextoRegla(Db, configuracion, horarios, ausencias, reloj);
 
         // Las mismas reglas que registra AgregarReglas, en el mismo orden de prioridad.
         IReglaNegocio[] reglas =

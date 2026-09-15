@@ -20,6 +20,7 @@ public class Dialog360ProviderTests
         new(new HttpClient(handler) { BaseAddress = new Uri("https://waba-v2.360dialog.io/") },
             Options.Create(new Dialog360Opciones { ApiKey = "clave-prueba" }),
             new LimitadorEnvio(10),
+            TimeProvider.System,
             NullLogger<Dialog360Provider>.Instance);
 
     [Fact]

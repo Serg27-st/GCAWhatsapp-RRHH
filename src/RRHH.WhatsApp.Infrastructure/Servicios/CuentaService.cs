@@ -6,7 +6,7 @@ using RRHH.WhatsApp.Infrastructure.Persistencia;
 
 namespace RRHH.WhatsApp.Infrastructure.Servicios;
 
-public sealed class CuentaService(RrhhDbContext db) : ICuentaService
+public sealed class CuentaService(RrhhDbContext db, TimeProvider reloj) : ICuentaService
 {
     public async Task<IReadOnlyList<Cuenta>> ListarConVacantesAbiertasAsync(CancellationToken ct = default) =>
         await db.Cuentas
@@ -42,7 +42,7 @@ public sealed class CuentaService(RrhhDbContext db) : ICuentaService
             Titulo = titulo,
             Estado = EstadoHc.Abierta,
             UrlJobForms = urlJobForms,
-            FechaCreacion = DateTime.UtcNow
+            FechaCreacion = reloj.GetUtcNow().UtcDateTime
         };
 
         db.Hcs.Add(vacante);
@@ -62,7 +62,7 @@ public sealed class CuentaService(RrhhDbContext db) : ICuentaService
             return;
 
         vacante.Estado = EstadoHc.Cerrada;
-        vacante.FechaCierre = DateTime.UtcNow;
+        vacante.FechaCierre = reloj.GetUtcNow().UtcDateTime;
 
         // Regla 20: desde aca el bot deja de ofrecerla y el formulario deja de aceptar envios.
         // El formulario de Google, en cambio, hay que desactivarlo a mano (ver docs/decisiones.md).
@@ -201,7 +201,7 @@ public sealed class CuentaService(RrhhDbContext db) : ICuentaService
             EntidadId = cuentaId.ToString(),
             Detalle = $"Analista {analistaId}.",
             Accion = esBackup ? "RespaldoAsignado" : "TitularAsignado",
-            Fecha = DateTime.UtcNow
+            Fecha = reloj.GetUtcNow().UtcDateTime
         });
 
         await db.SaveChangesAsync(ct);
@@ -268,7 +268,7 @@ public sealed class CuentaService(RrhhDbContext db) : ICuentaService
 
         await db.SaveChangesAsync(ct);
     }
-    private static Auditoria Auditar(int hcId, int analistaId, string accion, string? detalle) =>
+    private Auditoria Auditar(int hcId, int analistaId, string accion, string? detalle) =>
         new()
         {
             EntidadTipo = nameof(Hc),
@@ -276,6 +276,6 @@ public sealed class CuentaService(RrhhDbContext db) : ICuentaService
             AnalistaId = analistaId,
             Accion = accion,
             Detalle = detalle,
-            Fecha = DateTime.UtcNow
+            Fecha = reloj.GetUtcNow().UtcDateTime
         };
 }

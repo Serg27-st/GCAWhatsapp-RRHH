@@ -16,6 +16,7 @@ public class FirmaWebhookTests
         new(new HttpClient { BaseAddress = new Uri("https://ejemplo.invalid/") },
             Options.Create(new Dialog360Opciones { ApiKey = "clave", SecretoWebhook = secreto ?? string.Empty }),
             new LimitadorEnvio(10),
+            TimeProvider.System,
             NullLogger<Dialog360Provider>.Instance);
 
     private static Dictionary<string, string> ConFirma(string firma) =>
