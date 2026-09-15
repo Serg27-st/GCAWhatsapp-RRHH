@@ -168,5 +168,11 @@ public class Plantilla
     public required string TextoAprobado { get; set; }
 
     public int CantidadParametros { get; set; }
-    public bool Activa { get; set; } = true;
+
+    /// <summary>
+    /// Nace en false (V8, COR-16): solo se activa a mano cuando Meta aprobó la plantilla. Con true
+    /// por defecto, un alta desde código que omitiera el campo quedaba lista para enviar sin
+    /// aprobación, que es lo que provoca los bloqueos.
+    /// </summary>
+    public bool Activa { get; set; } = false;
 }
