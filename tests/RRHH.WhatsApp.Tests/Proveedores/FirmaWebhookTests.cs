@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using RRHH.WhatsApp.Infrastructure.Proveedores;
@@ -97,44 +96,5 @@ public class FirmaWebhookTests
 
         Assert.Equal(a, b);
         Assert.Equal(64, a.Length); // HMAC-SHA256 en hexadecimal.
-    }
-}
-
-public class LimitadorEnvioTests
-{
-    [Fact]
-    public async Task Deja_pasar_los_primeros_envios_sin_esperar()
-    {
-        using var limitador = new LimitadorEnvio(maximoPorSegundo: 5);
-        var reloj = Stopwatch.StartNew();
-
-        for (var i = 0; i < 5; i++)
-            await limitador.EsperarTurnoAsync();
-
-        Assert.True(reloj.ElapsedMilliseconds < 200, $"No deberia haber esperado, pero tardo {reloj.ElapsedMilliseconds} ms.");
-    }
-
-    [Fact]
-    public async Task Frena_cuando_se_supera_el_tope_por_segundo()
-    {
-        // Es la guarda de la Seccion 9.6.4: el volumen saliente sin control es una de las causas
-        // del bloqueo original.
-        using var limitador = new LimitadorEnvio(maximoPorSegundo: 2);
-        var reloj = Stopwatch.StartNew();
-
-        for (var i = 0; i < 3; i++)
-            await limitador.EsperarTurnoAsync();
-
-        Assert.True(reloj.ElapsedMilliseconds >= 900,
-            $"El tercer envio debio esperar cerca de un segundo, pero paso en {reloj.ElapsedMilliseconds} ms.");
-    }
-
-    [Fact]
-    public async Task Un_tope_invalido_no_deja_el_limitador_abierto()
-    {
-        using var limitador = new LimitadorEnvio(maximoPorSegundo: 0);
-
-        Assert.Equal(1, limitador.MaximoPorSegundo);
-        await limitador.EsperarTurnoAsync();
     }
 }

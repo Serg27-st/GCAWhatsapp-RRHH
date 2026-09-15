@@ -51,7 +51,23 @@ public class ComposicionProveedorTests
         servicios.Configure<HttpClientFactoryOptions>(nameof(IWhatsAppProvider), opciones =>
             opciones.HttpMessageHandlerBuilderActions.Add(builder => builder.PrimaryHandler = handlerFalso));
 
+        // Desde T0.04 el limitador lee envio.maximo_por_segundo de la base antes de cada envio. Sin
+        // esto la prueba esperaria el timeout de conexion a SQL Server —o leeria una base local si
+        // la hay—, y lo que se prueba aca es el cliente HTTP, no el parametro.
+        servicios.AddScoped<IConfiguracionReglasService, ConfiguracionSinBase>();
+
         return servicios.BuildServiceProvider();
+    }
+
+    private sealed class ConfiguracionSinBase : IConfiguracionReglasService
+    {
+        public Task<IReadOnlyDictionary<string, string>> ObtenerTodasAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>());
+
+        public Task<IReadOnlyList<Domain.Entidades.ConfiguracionRegla>> ListarAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Domain.Entidades.ConfiguracionRegla>>([]);
+
+        public Task EstablecerAsync(string clave, string valor, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     [Fact]

@@ -21,7 +21,12 @@ public sealed class Dialog360Opciones
     /// </summary>
     public string SecretoWebhook { get; set; } = string.Empty;
 
-    /// <summary>Tope de mensajes salientes por segundo. Se lee de ConfiguracionReglas y este valor es el respaldo.</summary>
+    /// <summary>
+    /// Tope de mensajes salientes por segundo. El valor que manda es
+    /// <c>envio.maximo_por_segundo</c> en <c>ConfiguracionReglas</c>, leído por
+    /// <see cref="ProveedorParametrosEnvio"/> con caché de 30 s (COR-12/AL8). Este solo se usa
+    /// como respaldo, si la base no tiene el parámetro, no es válido, o no se puede leer.
+    /// </summary>
     public int MaximoPorSegundo { get; set; } = 10;
 
     public int TimeoutSegundos { get; set; } = 10;

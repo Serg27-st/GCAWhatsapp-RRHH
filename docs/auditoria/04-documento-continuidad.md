@@ -1524,7 +1524,7 @@ dotnet ef migrations add NombreDelCambio --project src/RRHH.WhatsApp.Infrastruct
 | [x] | T0.01 Línea base | — | 2026-09-14 · `d579e29` · Build 0/0, pruebas 349 ok / 4 omitidas. **Desvío:** commit directo en `master`, sin rama `auditoria/linea-base` |
 | [x] | T0.02 Decisiones V28–V36 y D7; puntero en CLAUDE.md | T0.01 | 2026-09-14 · Ratificadas todas sin objeciones. Se agregó también la fila D6 (JWT, citada en V20 y ausente de la tabla) y referencias cruzadas en V8, V14, V20 y V22. Solo documentación |
 | [x] | T0.03 Proveedores sin reintentos implícitos | T0.01 | 2026-09-15 · Build 0/0, pruebas 360 ok / 4 omitidas (+11). Clasificación compartida en `ClasificadorFallosHttp`: `HttpRequestError` DNS/conexión/TLS → Transitorio; resto → Ambiguo. Además de lo pedido: `Dialog360ProviderTests` y `ComposicionProveedorTests` (el contenedor real no reintenta un 503; antes hacía 4 peticiones). README actualizado |
-| [ ] | T0.04 Limitador con parámetro | T0.01 | |
+| [x] | T0.04 Limitador con parámetro | T0.01 | 2026-09-15 · Build 0/0, pruebas 372 ok / 4 omitidas (+12). **Desvíos:** `LimitadorEnvio` recibe `Func<CancellationToken, ValueTask<int>>` en vez de `Func<int>` (evita sync-over-async); `ProveedorParametrosEnvio` usa `TimeProvider` (registrado con `TryAddSingleton`, T0.08 lo formaliza). Se quitó `LimitadorEnvio.MaximoPorSegundo`. Latencia real de un cambio: ≤30 s en la Api, ≤60 s en el Worker (se suma la caché de `ConfiguracionReglasService`). La descripción «por proceso emisor» del parámetro (COR-12) queda para T2.10 |
 | [ ] | T0.05 Plantillas inactivas por defecto | T0.01 | |
 | [ ] | T0.06 Límite de velocidad del webhook de Google y 429 | T0.01 | |
 | [ ] | T0.07 Validación del JobForms público | T0.06 | |
@@ -1554,7 +1554,7 @@ dotnet ef migrations add NombreDelCambio --project src/RRHH.WhatsApp.Infrastruct
 | [ ] | T2.07 Migración `CodigoAvisoVacante` | T0.02 | |
 | [ ] | T2.08 Migración `VencimientoTransferencias` | T0.02 | |
 | [ ] | T2.09 Migración `IndicesYRetorno` | T0.02 | |
-| [ ] | T2.10 Migración `ParametrosAtencionPreferente` | T0.02 | |
+| [ ] | T2.10 Migración `ParametrosAtencionPreferente` | T0.02 | Incluir el `UpdateData` de la descripción de `envio.maximo_por_segundo`: «por proceso emisor» (COR-12, pendiente de T0.04) |
 | [ ] | T2.11 Contexto y acciones: dominio | T2.03, T2.06, T2.08, T1.10 | |
 | [ ] | T2.12 Payload mínimo con instantánea | T2.11, T1.03 | |
 | [ ] | T2.13 Fábrica con contexto nuevo | T2.12, T2.02, T2.07 | |

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using RRHH.WhatsApp.Application.Casos;
 using RRHH.WhatsApp.Application.Reglas;
@@ -126,10 +127,31 @@ public static class RegistroDependencias
         var meta = seccionMeta.Get<OpcionesMetaCloud>() ?? new OpcionesMetaCloud();
         var dialog = seccion360.Get<Dialog360Opciones>() ?? new Dialog360Opciones();
 
+        // T0.08 registrara TimeProvider formalmente para toda la Infrastructure; TryAdd evita
+        // pisarlo si ese registro ya corrio (o corre despues) en el mismo contenedor.
+        servicios.TryAddSingleton(TimeProvider.System);
+
+        // Respaldo de appsettings para cuando envio.maximo_por_segundo no se puede leer de la
+        // base (COR-12/AL8): el de quien haya quedado configurado, Meta o 360dialog.
+        var maximoPorSegundoDeRespaldo = meta.EstaConfigurado ? meta.MaximoPorSegundo : dialog.MaximoPorSegundo;
+
+        // El limitador y su proveedor de parametros se registran una sola vez, antes de elegir
+        // proveedor, para no duplicar este cableado en las tres ramas de mas abajo (Meta /
+        // 360dialog / simulado). ProveedorParametrosEnvio hace lo que antes hacia leer
+        // meta.MaximoPorSegundo o dialog.MaximoPorSegundo una vez al arrancar: ahora consulta
+        // envio.maximo_por_segundo en cada turno, con cache de 30 s, y cae a este respaldo si la
+        // base no tiene el parametro o no responde.
+        servicios.AddSingleton(sp => new ProveedorParametrosEnvio(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            maximoPorSegundoDeRespaldo,
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<ProveedorParametrosEnvio>>()));
+
+        servicios.AddSingleton(sp => new LimitadorEnvio(
+            ct => sp.GetRequiredService<ProveedorParametrosEnvio>().ObtenerMaximoPorSegundoAsync(ct)));
+
         if (meta.EstaConfigurado)
         {
-            servicios.AddSingleton(new LimitadorEnvio(meta.MaximoPorSegundo));
-
             // Sin handler de resiliencia (ARQ-04/C4, V29): reintentar un POST por su cuenta anula
             // "Ambiguo no se reintenta solo", esquiva el LimitadorEnvio y se suma a los reintentos
             // de ReintentoEnvios. El unico reintento del sistema es ese; el adaptador clasifica la
@@ -144,8 +166,6 @@ public static class RegistroDependencias
 
             return servicios;
         }
-
-        servicios.AddSingleton(new LimitadorEnvio(dialog.MaximoPorSegundo));
 
         // Sin credenciales de ninguno se trabaja contra el proveedor simulado. Es lo que permite
         // avanzar mientras el WABA sigue en aprobacion, que es el cuello de botella real.

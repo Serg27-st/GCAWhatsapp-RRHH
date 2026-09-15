@@ -631,6 +631,25 @@ reciclara la Api en bucle sin arreglar nada.
 monitor externo que lo consulte cada pocos minutos y avise. Cualquier cosa sirve —una tarea
 programada con `curl`, o el monitoreo que ya use Sistemas—; lo que no sirve es suponer que un
 endpoint en rojo alcanza por sí solo.
+
+### Velocidad de envío
+
+`LimitadorEnvio` (Sección 9.6.4) es una ventana deslizante de un segundo delante de cada adaptador:
+si se llena, el mensaje espera en vez de descartarse o de saltarse el tope. El volumen saliente sin
+control fue una de las causas del bloqueo original, así que esto no es una optimización — es una
+guarda que se aplica **por proceso emisor** (con ARQ-03 el único emisor del bot es el Worker; la
+Api solo despacha respuestas humanas de los analistas).
+
+El tope no se fija al arrancar: `ProveedorParametrosEnvio` lo lee de `envio.maximo_por_segundo` en
+`ConfiguracionReglas` antes de cada turno, con una caché de 30 s (constante técnica, no de
+negocio). Un cambio del parámetro desde la administración llega al límite sin reiniciar nada: en la
+Api en hasta 30 s, y en el Worker en hasta un minuto, porque ahí también vence la caché de 30 s de
+`ConfiguracionReglasService`, que solo se invalida en el proceso que guardó el cambio. `MetaCloud:MaximoPorSegundo` y `Dialog360:MaximoPorSegundo` en
+`appsettings.json` quedan solo como respaldo: se usan si la base no tiene el parámetro, no es un
+número válido, o no se puede leer (una caída de SQL Server nunca frena un envío — se sigue con el
+último tope conocido y se registra un warning, sin volver a golpear la base antes de que expire la
+caché).
+
 ### Reintento de envíos salientes
 
 Un error pasajero de Meta —un 503, un corte de red— dejaba al postulante sin la respuesta del bot,

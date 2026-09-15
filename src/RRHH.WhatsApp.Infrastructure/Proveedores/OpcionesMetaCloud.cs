@@ -39,7 +39,12 @@ public sealed class OpcionesMetaCloud
     /// </summary>
     public string TokenVerificacion { get; set; } = string.Empty;
 
-    /// <summary>Tope de mensajes salientes por segundo (Sección 9.6.4).</summary>
+    /// <summary>
+    /// Tope de mensajes salientes por segundo (Sección 9.6.4). Es el respaldo: el valor que manda
+    /// es <c>envio.maximo_por_segundo</c> en <c>ConfiguracionReglas</c>, leído por
+    /// <see cref="ProveedorParametrosEnvio"/> con caché de 30 s (COR-12/AL8). Este solo se usa si
+    /// la base no tiene el parámetro, no es válido, o no se puede leer.
+    /// </summary>
     public int MaximoPorSegundo { get; set; } = 10;
 
     public int TimeoutSegundos { get; set; } = 10;
