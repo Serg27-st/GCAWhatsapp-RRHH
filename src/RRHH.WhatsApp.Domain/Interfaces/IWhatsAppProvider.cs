@@ -4,13 +4,28 @@ using RRHH.WhatsApp.Domain.Enums;
 namespace RRHH.WhatsApp.Domain.Interfaces;
 
 /// <summary>Mensaje entrante ya normalizado, independiente del proveedor que lo entrego.</summary>
+/// <param name="Medio">El archivo que trae, si trae uno (ARQ-10). Nulo en texto, botones y ubicaciones.</param>
 public sealed record MensajeEntranteDto(
     string ProviderMessageId,
     string TelefonoE164,
     string? NombrePerfil,
     string Contenido,
     string? IdBotonPulsado,
-    DateTime FechaUtc);
+    DateTime FechaUtc,
+    MedioEntranteDto? Medio = null);
+
+/// <summary>
+/// Lo que el webhook dice de un archivo entrante (V33): lo necesario para pedirlo al proveedor y para
+/// mostrarlo. El archivo en si no viene: se descarga aparte, y el id caduca.
+/// </summary>
+/// <param name="Tipo"><c>image</c>, <c>document</c>, <c>audio</c>, <c>video</c> o <c>sticker</c>.</param>
+/// <param name="Leyenda">El texto que la persona escribio junto al archivo.</param>
+public sealed record MedioEntranteDto(
+    string ProveedorMedioId,
+    string Tipo,
+    string MimeType,
+    string? NombreArchivo,
+    string? Leyenda);
 
 /// <summary>
 /// Resultado de un envio. <paramref name="Clase"/> es lo que permite decidir si reintentar:
@@ -95,4 +110,46 @@ public interface IWhatsAppProvider
     /// un mensaje que ya salio.
     /// </summary>
     IReadOnlyList<EstadoEntregaDto> InterpretarEstados(string cuerpoCrudo);
+
+    /// <summary>
+    /// Baja un archivo que mando el postulante (V33). El adaptador sigue siendo lo unico que habla
+    /// con el proveedor, tambien para esto.
+    /// <para>
+    /// No pasa por el limitador de envio: no es un mensaje saliente y no forma parte del patron que
+    /// provoco el bloqueo. Nunca lanza por un fallo del proveedor: lo clasifica.
+    /// </para>
+    /// </summary>
+    Task<ResultadoDescarga> DescargarMedioAsync(string proveedorMedioId, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Un archivo bajado del proveedor. Quien lo recibe es dueño del flujo y tiene que cerrarlo: detras
+/// hay una conexion abierta, porque un documento puede pesar decenas de megas y no se carga en memoria.
+/// </summary>
+public sealed record MedioDescargado(Stream Contenido, string MimeType, long? Tamano) : IDisposable, IAsyncDisposable
+{
+    public void Dispose() => Contenido.Dispose();
+
+    public ValueTask DisposeAsync() => Contenido.DisposeAsync();
+}
+
+/// <summary>
+/// En que quedo pedir un archivo (V33).
+/// <para>
+/// A diferencia de <see cref="ResultadoEnvio"/>, no hay fallo ambiguo: pedir un archivo no cambia nada
+/// del lado del proveedor, y repetirlo no duplica nada. Lo que importa es si vale la pena reintentar
+/// antes de que el id caduque.
+/// </para>
+/// </summary>
+public sealed record ResultadoDescarga(MedioDescargado? Medio, string? Error, ClaseFallo Clase = ClaseFallo.Ninguno)
+{
+    public bool Exito => Medio is not null;
+
+    public static ResultadoDescarga Ok(MedioDescargado medio) => new(medio, null);
+
+    /// <summary>El proveedor no respondio, se corto la conexion o esta saturado: se puede volver a pedir.</summary>
+    public static ResultadoDescarga Transitorio(string error) => new(null, error, ClaseFallo.Transitorio);
+
+    /// <summary>El id vencio o no existe, o faltan credenciales: pedirlo de nuevo da lo mismo.</summary>
+    public static ResultadoDescarga Permanente(string error) => new(null, error, ClaseFallo.Permanente);
 }

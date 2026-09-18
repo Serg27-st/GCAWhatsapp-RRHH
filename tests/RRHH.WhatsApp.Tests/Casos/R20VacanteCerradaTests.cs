@@ -16,18 +16,6 @@ public class R20VacanteCerradaTests : IDisposable
 
     private IEnumerable<EnvioSimulado> Textos() => _entorno.Proveedor.Enviados.Where(e => e.Tipo == "texto");
 
-    /// <summary>
-    /// Activa la plantilla solo dentro de la prueba. En produccion nacen inactivas hasta que Meta
-    /// las apruebe; aca hace falta para comprobar que el aviso realmente sale.
-    /// </summary>
-    private async Task ActivarPlantillaAsync(string clave)
-    {
-        var plantilla = await _entorno.Db.Plantillas.FirstAsync(p => p.Clave == clave);
-        plantilla.Activa = true;
-
-        await _entorno.Db.SaveChangesAsync();
-    }
-
     private async Task CerrarVacanteAsync(int hcId)
     {
         var vacante = await _entorno.Db.Hcs.FirstAsync(h => h.HcId == hcId);
@@ -41,11 +29,15 @@ public class R20VacanteCerradaTests : IDisposable
     [Fact]
     public async Task Sin_vacantes_abiertas_se_avisa_y_se_vuelve_al_menu_de_empresas()
     {
-        await ActivarPlantillaAsync(ClavesPlantilla.VacanteCerrada);
         await CerrarVacanteAsync(1);
 
-        // Se deja otra cuenta con vacante abierta para que el menu tenga que ofrecer.
+        // Se deja otra cuenta lista para el menu: activa, con titular y con vacante con formulario
+        // (COR-09). Sin cualquiera de las tres el menu no la ofreceria.
         _entorno.Db.Cuentas.Add(new Cuenta { CuentaId = 8, Nombre = "Intradevco", Activo = true });
+        _entorno.Db.AnalistaCuentas.Add(new AnalistaCuenta
+        {
+            AnalistaCuentaId = 3, AnalistaId = EntornoDeReglas.TitularId, CuentaId = 8, EsBackup = false
+        });
         _entorno.Db.Hcs.Add(new Hc
         {
             HcId = 3,
@@ -61,8 +53,10 @@ public class R20VacanteCerradaTests : IDisposable
         await _entorno.IngresarAsync(PayloadsDePrueba.RespuestaDeBoton);
         await _entorno.ConsumirOutboxAsync();
 
-        var aviso = Assert.Single(_entorno.Proveedor.Enviados, e => e.Tipo == "plantilla");
-        Assert.Equal(ClavesPlantilla.VacanteCerrada, aviso.Detalle);
+        // COR-03 (P1): el postulante acaba de escribir, asi que el aviso sale en texto y no depende
+        // de que Meta haya aprobado la plantilla, que sigue inactiva.
+        var aviso = Assert.Single(Textos());
+        Assert.Contains("ya fue cubierta", aviso.Detalle);
 
         Assert.Single(_entorno.Proveedor.Enviados, e => e.Tipo == "botones");
 
@@ -79,7 +73,8 @@ public class R20VacanteCerradaTests : IDisposable
         await _entorno.IngresarAsync(PayloadsDePrueba.RespuestaDeBoton);
         await _entorno.ConsumirOutboxAsync();
 
-        Assert.Empty(Textos());
+        // Sale el aviso de la vacante cubierta, pero ningun enlace de formulario.
+        Assert.DoesNotContain(Textos(), e => e.Detalle.Contains("completa esta ficha"));
         Assert.Empty(_entorno.Db.JobFormsInvitaciones);
     }
 

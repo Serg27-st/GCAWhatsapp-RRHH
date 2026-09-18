@@ -33,12 +33,23 @@
     else
     {
         <section class="tarjetas">
+            @* FUN-17 (A15): lo que manda es el tiempo en horas de atención. A reloj corrido, un mensaje
+               del viernes a la tarde respondido el lunes da tres días y dice que nadie contesta. *@
             <div class="tarjeta-metrica">
                 <h3>Primera respuesta</h3>
-                <p class="numero">@Duracion(_metricas.Respuesta.MinutosPromedio)</p>
-                <span class="detalle">mediana @Duracion(_metricas.Respuesta.MinutosMediana)</span>
-                <span class="detalle">@_metricas.Respuesta.DentroDelPlazo dentro del plazo</span>
-                <span class="detalle">@_metricas.Respuesta.ConversacionesSinResponder sin responder</span>
+                <p class="numero">@Duracion(_metricas.Respuesta.MinutosHabilesPromedio)</p>
+                <span class="detalle">en horas de atención; mediana @Duracion(_metricas.Respuesta.MinutosHabilesMediana)</span>
+                <span class="detalle">@_metricas.Respuesta.PorcentajeDentroDelPlazo.ToString("P0") dentro del plazo</span>
+                <span class="detalle">a reloj corrido @Duracion(_metricas.Respuesta.MinutosPromedio)</span>
+            </div>
+
+            @* Cada vez que el postulante escribió y quedó esperando: un hilo que va y viene tres veces
+               son tres esperas, y medir solo la primera tapaba las demás (M7). *@
+            <div class="tarjeta-metrica">
+                <h3>Esperas</h3>
+                <p class="numero">@_metricas.Respuesta.Tandas</p>
+                <span class="detalle">@_metricas.Respuesta.TandasRespondidas respondidas</span>
+                <span class="detalle">@(_metricas.Respuesta.Tandas - _metricas.Respuesta.TandasRespondidas) sin responder</span>
             </div>
 
             <div class="tarjeta-metrica">
@@ -64,7 +75,7 @@
                         <th>Analista</th>
                         <th>Conversaciones</th>
                         <th>Mensajes</th>
-                        <th>1ª respuesta</th>
+                        <th>Respuesta (horas de atención)</th>
                         <th>Contratados</th>
                         <th>Descartados</th>
                     </tr>
@@ -76,7 +87,7 @@
                             <td>@analista.Nombre</td>
                             <td>@analista.ConversacionesAtendidas</td>
                             <td>@analista.MensajesEnviados</td>
-                            <td>@Duracion(analista.MinutosPromedioPrimeraRespuesta)</td>
+                            <td>@Duracion(analista.MinutosHabilesPromedioRespuesta)</td>
                             <td>@analista.Contratados</td>
                             <td>@analista.Descartados</td>
                         </tr>

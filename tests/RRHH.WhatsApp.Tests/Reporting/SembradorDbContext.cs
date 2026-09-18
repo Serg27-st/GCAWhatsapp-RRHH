@@ -19,6 +19,9 @@ internal sealed class SembradorDbContext(DbContextOptions<SembradorDbContext> op
     public DbSet<Auditoria> Auditorias => Set<Auditoria>();
     public DbSet<ConfiguracionRegla> ConfiguracionReglas => Set<ConfiguracionRegla>();
 
+    /// <summary>V31: la primera respuesta se mide en horas hábiles, con estos tramos (FUN-17).</summary>
+    public DbSet<HorarioAtencion> HorariosAtencion => Set<HorarioAtencion>();
+
     protected override void OnModelCreating(ModelBuilder modelo)
     {
         modelo.Entity<Conversacion>(b =>
@@ -35,6 +38,7 @@ internal sealed class SembradorDbContext(DbContextOptions<SembradorDbContext> op
             b.HasKey(x => x.MensajeId);
             b.Ignore(x => x.Conversacion);
             b.Ignore(x => x.Plantilla);
+            b.Ignore(x => x.Adjuntos);
         });
 
         modelo.Entity<Postulacion>(b =>
@@ -59,6 +63,12 @@ internal sealed class SembradorDbContext(DbContextOptions<SembradorDbContext> op
             b.HasKey(x => x.CuentaId);
             b.Ignore(x => x.Vacantes);
             b.Ignore(x => x.Asignaciones);
+        });
+
+        modelo.Entity<HorarioAtencion>(b =>
+        {
+            b.HasKey(x => x.HorarioId);
+            b.Ignore(x => x.Cuenta);
         });
 
         modelo.Entity<Auditoria>(b => b.HasKey(x => x.AuditoriaId));

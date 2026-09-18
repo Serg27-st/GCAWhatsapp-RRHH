@@ -18,6 +18,12 @@ public static class ClaimsAnalista
 
     public const string Rol = ClaimTypes.Role;
 
+    /// <summary>
+    /// ARQ-11 (V34): versión de seguridad de la sesión. Si no coincide con la del analista, el token
+    /// quedó atrás —le restablecieron la contraseña, le dieron de baja— y no entra.
+    /// </summary>
+    public const string VersionSeguridad = "ver";
+
     /// <summary>Regla 4: el rol Sistemas ve todas las conversaciones, para soporte y auditoría.</summary>
     public const string RolSistemas = "Sistemas";
 
@@ -41,6 +47,7 @@ public sealed class EmisorTokens(IOptions<OpcionesJwt> opciones, TimeProvider re
             new(ClaimsAnalista.AnalistaId, analista.AnalistaId.ToString()),
             new(ClaimTypes.Name, analista.Nombre ?? string.Empty),
             new(ClaimsAnalista.Rol, analista.Rol ?? "Analista"),
+            new(ClaimsAnalista.VersionSeguridad, analista.VersionSeguridad.ToString()),
             // Identifica este token en particular: es lo que permitiría revocarlo si algún día
             // hace falta una lista de tokens anulados.
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())

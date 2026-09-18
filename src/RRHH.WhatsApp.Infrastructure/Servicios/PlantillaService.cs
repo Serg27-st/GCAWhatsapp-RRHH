@@ -58,6 +58,9 @@ public sealed class PlantillaService(RrhhDbContext db, TimeProvider reloj, ILogg
         return reloj.GetUtcNow().UtcDateTime - ultimo < VentanaServicio;
     }
 
+    public Task<Plantilla?> ObtenerPorIdAsync(int plantillaId, CancellationToken ct = default) =>
+        db.Plantillas.AsNoTracking().FirstOrDefaultAsync(p => p.PlantillaId == plantillaId, ct);
+
     public async Task<IReadOnlyList<Plantilla>> ListarActivasAsync(CancellationToken ct = default) =>
         await db.Plantillas
             .AsNoTracking()

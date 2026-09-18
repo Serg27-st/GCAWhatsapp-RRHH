@@ -2,7 +2,9 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using NSubstitute;
+using RRHH.WhatsApp.Api.Configuracion;
 using RRHH.WhatsApp.Api.Controllers;
 using RRHH.WhatsApp.Api.Seguridad;
 using RRHH.WhatsApp.Contracts.Bandeja;
@@ -66,7 +68,10 @@ public class AdministracionPorRolTests
         new(_cuentas, _ausencias, _analistas, TimeProvider.System) { ControllerContext = Como(rol) };
 
     private VacantesController Vacantes(string rol) =>
-        new(_cuentas, _postulaciones, NullLogger<VacantesController>.Instance) { ControllerContext = Como(rol) };
+        new(_cuentas, _postulaciones, Options.Create(new OpcionesWhatsApp()), NullLogger<VacantesController>.Instance)
+        {
+            ControllerContext = Como(rol)
+        };
 
     private static PeticionAusencia Semana() =>
         new(DateTime.UtcNow.AddDays(1), DateTime.UtcNow.AddDays(8), "Vacaciones");

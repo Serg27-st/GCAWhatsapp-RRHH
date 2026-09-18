@@ -24,7 +24,7 @@ public class AusenciaServiceTests : IDisposable
             .Options);
 
         _db.Database.EnsureCreated();
-        _ausencias = new AusenciaService(_db);
+        _ausencias = new AusenciaService(_db, TimeProvider.System);
     }
 
     private Task<Ausencia> RegistrarAsync(int analistaId, int desdeDias, int hastaDias) =>

@@ -31,7 +31,11 @@ public sealed class FiltroAccesoConversacion(IConversacionService conversaciones
         var nivel = await conversaciones.ObtenerAccesoAsync(
             conversacionId, http.User.AnalistaId(), http.RequestAborted);
 
-        if (ResultadoAcceso.Evaluar(nivel, ResultadoAcceso.Actua(http.Request), "la conversación") is { } rechazo)
+        // FUN-01: tomar un hilo de la bandeja general se hace con nivel Lectura, porque todavia no es
+        // de quien lo toma. El servicio valida lo que importa: que trabaje esa cuenta.
+        var actua = ResultadoAcceso.Actua(http.Request) && !PermiteTomar(contexto);
+
+        if (ResultadoAcceso.Evaluar(nivel, actua, "la conversación") is { } rechazo)
         {
             contexto.Result = rechazo;
             return;
@@ -41,4 +45,7 @@ public sealed class FiltroAccesoConversacion(IConversacionService conversaciones
 
         await siguiente();
     }
+
+    private static bool PermiteTomar(ActionExecutingContext contexto) =>
+        contexto.ActionDescriptor.EndpointMetadata.OfType<PermiteTomarAttribute>().Any();
 }

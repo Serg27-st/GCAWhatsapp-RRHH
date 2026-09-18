@@ -37,8 +37,14 @@ builder.Services.AddHostedService(servicios => servicios.GetRequiredService<Guar
 
 builder.Services.AddHostedService<ConsumidorOutbox>();
 builder.Services.AddHostedService<ServicioBarridoTiempo>();
-builder.Services.AddHostedService<ServicioPurgaCv>();
+builder.Services.AddHostedService<ServicioMantenimientoDatos>();
 builder.Services.AddHostedService<ServicioReintentoEnvios>();
+
+// V29: lo que decide el bot se encola y sale por aca. Despues de la guardia, como todos los bucles.
+builder.Services.AddHostedService<ServicioDespachoEnvios>();
+
+// V33: los archivos de los postulantes se bajan aparte, a su ritmo, antes de que el id caduque.
+builder.Services.AddHostedService<ServicioDescargaAdjuntos>();
 
 var host = builder.Build();
 var guardia = host.Services.GetRequiredService<GuardiaInstancia>();

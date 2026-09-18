@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using RRHH.WhatsApp.Application.Casos;
 using RRHH.WhatsApp.Domain.Entidades;
 using RRHH.WhatsApp.Domain.Enums;
 using RRHH.WhatsApp.Tests.Proveedores;
@@ -6,132 +7,126 @@ using RRHH.WhatsApp.Tests.Proveedores;
 namespace RRHH.WhatsApp.Tests.Casos;
 
 /// <summary>
-/// Regla 16 sobre el barrido del Worker. Comparte disparador con la Regla 2, asi que las pruebas
-/// cubren tambien como conviven: un hilo muerto se archiva en vez de escalarse.
+/// Regla 16 por postulación (FUN-11, A14, COR-14): lo que vence por silencio es el proceso, no el
+/// hilo. Antes el estado <c>Archivada</c> existía pero nadie lo asignaba (M6), y el analista se
+/// enteraba del archivado cuando la tarjeta ya no estaba.
 /// </summary>
 public class R16ArchivadoTests : IDisposable
 {
     private readonly EntornoDeReglas _entorno = new();
 
-    private static Dictionary<string, string> SinCabeceras() => [];
-
-    private async Task<int> ConversacionAsignadaAsync()
+    /// <summary>Un hilo con postulante y una postulación en el estado indicado, inactiva desde hace esos días.</summary>
+    private async Task<int> PostulacionAsync(EstadoPostulacion estado, double diasSinActividad)
     {
         await _entorno.IngresarAsync(PayloadsDePrueba.RespuestaDeBoton);
         await _entorno.ConsumirOutboxAsync();
 
-        return (await _entorno.Db.Conversaciones.FirstAsync()).ConversacionId;
-    }
-
-    private async Task InactivaDesdeHaceAsync(int conversacionId, TimeSpan atraso)
-    {
-        var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == conversacionId);
-
-        var momento = _entorno.Ahora - atraso;
-
-        conversacion.FechaUltimaActividad = momento;
-        conversacion.FechaUltimoMensajeEntrante = momento;
-
-        await _entorno.Db.SaveChangesAsync();
-    }
-
-    /// <summary>Le da al hilo un postulante con una postulacion en el estado indicado.</summary>
-    private async Task ConPostulacionAsync(int conversacionId, EstadoPostulacion estado)
-    {
         var postulante = new Postulante { Dni = "45678912", FechaRegistro = _entorno.Ahora };
         _entorno.Db.Postulantes.Add(postulante);
         await _entorno.Db.SaveChangesAsync();
 
-        _entorno.Db.Postulaciones.Add(new Postulacion
+        var postulacion = new Postulacion
         {
             PostulanteId = postulante.PostulanteId,
             HcId = 1,
             CuentaId = EntornoDeReglas.CuentaId,
+            AnalistaAsignadoId = EntornoDeReglas.TitularId,
             EtapaKanbanId = 1,
             Estado = estado,
-            FechaCreacion = _entorno.Ahora,
-            FechaUltimaActividad = _entorno.Ahora
-        });
+            FechaCreacion = _entorno.Ahora.AddDays(-diasSinActividad),
+            FechaUltimaActividad = _entorno.Ahora.AddDays(-diasSinActividad)
+        };
 
-        var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == conversacionId);
+        _entorno.Db.Postulaciones.Add(postulacion);
+
+        var conversacion = await _entorno.Db.Conversaciones.FirstAsync();
         conversacion.PostulanteId = postulante.PostulanteId;
 
         await _entorno.Db.SaveChangesAsync();
+
+        return postulacion.PostulacionId;
     }
 
-    [Fact]
-    public async Task Tras_90_dias_sin_actividad_el_hilo_se_archiva()
+    private Task<Postulacion> LeerAsync(int id) =>
+        _entorno.Db.Postulaciones.AsNoTracking().FirstAsync(p => p.PostulacionId == id);
+
+    private Task<int> AvisosDeArchivadoAsync() =>
+        _entorno.Db.EventosSistema.CountAsync(
+            e => e.Tipo == TiposEvento.AnalistaNotificado && e.Payload.Contains("archivara"));
+
+    [Theory]
+    [InlineData(EstadoPostulacion.EnProceso)]
+    [InlineData(EstadoPostulacion.Descartado)]
+    public async Task Tras_90_dias_sin_actividad_la_postulacion_se_archiva(EstadoPostulacion estado)
     {
-        var id = await ConversacionAsignadaAsync();
+        var id = await PostulacionAsync(estado, diasSinActividad: 91);
 
-        await InactivaDesdeHaceAsync(id, TimeSpan.FromDays(120));
+        await _entorno.Barrido.ProcesarPostulacionAsync(id);
 
-        var acciones = await _entorno.Barrido.ProcesarConversacionAsync(id);
+        Assert.Equal(EstadoPostulacion.Archivada, (await LeerAsync(id)).Estado);
+        Assert.Contains(_entorno.Db.Auditorias, a => a.Accion == "Archivado" && a.EntidadTipo == nameof(Postulacion));
+    }
 
-        Assert.True(acciones > 0);
+    /// <summary>Dossier, Regla 16: sin marca de contratado o reingreso. Esos dos no se archivan por silencio.</summary>
+    [Theory]
+    [InlineData(EstadoPostulacion.Contratado)]
+    [InlineData(EstadoPostulacion.Reingreso)]
+    public async Task Contratada_o_de_reingreso_no_se_archiva(EstadoPostulacion estado)
+    {
+        var id = await PostulacionAsync(estado, diasSinActividad: 200);
 
-        var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == id);
-        Assert.Equal(EstadoConversacion.Archivada, conversacion.Estado);
+        await _entorno.Barrido.ProcesarPostulacionAsync(id);
+
+        Assert.Equal(estado, (await LeerAsync(id)).Estado);
     }
 
     [Fact]
     public async Task Antes_del_plazo_no_se_archiva()
     {
-        var id = await ConversacionAsignadaAsync();
+        var id = await PostulacionAsync(EstadoPostulacion.EnProceso, diasSinActividad: 60);
 
-        await InactivaDesdeHaceAsync(id, TimeSpan.FromDays(30));
+        await _entorno.Barrido.ProcesarPostulacionAsync(id);
 
-        await _entorno.Barrido.ProcesarConversacionAsync(id);
-
-        var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == id);
-        Assert.NotEqual(EstadoConversacion.Archivada, conversacion.Estado);
+        Assert.Equal(EstadoPostulacion.EnProceso, (await LeerAsync(id)).Estado);
     }
 
-    [Theory]
-    [InlineData(EstadoPostulacion.EnProceso)]
-    [InlineData(EstadoPostulacion.Contratado)]
-    public async Task Un_proceso_vivo_o_contratado_no_se_archiva_por_silencio(EstadoPostulacion estado)
+    /// <summary>A14: el analista se entera antes, cuando todavía puede hacer algo, y una sola vez.</summary>
+    [Fact]
+    public async Task A_siete_dias_del_archivado_se_avisa_al_analista_una_sola_vez()
     {
-        var id = await ConversacionAsignadaAsync();
+        var id = await PostulacionAsync(EstadoPostulacion.EnProceso, diasSinActividad: 84);
 
-        await ConPostulacionAsync(id, estado);
-        await InactivaDesdeHaceAsync(id, TimeSpan.FromDays(120));
+        await _entorno.Barrido.ProcesarPostulacionAsync(id);
+        await _entorno.Barrido.ProcesarPostulacionAsync(id);
 
-        await _entorno.Barrido.ProcesarConversacionAsync(id);
+        Assert.Equal(1, await AvisosDeArchivadoAsync());
 
-        var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == id);
-        Assert.NotEqual(EstadoConversacion.Archivada, conversacion.Estado);
+        var postulacion = await LeerAsync(id);
+
+        Assert.NotNull(postulacion.FechaAvisoArchivado);
+        Assert.Equal(EstadoPostulacion.EnProceso, postulacion.Estado);
     }
 
     [Fact]
-    public async Task Un_postulante_descartado_si_deja_archivar_el_hilo()
+    public async Task Antes_de_la_ventana_de_aviso_no_se_avisa()
     {
-        var id = await ConversacionAsignadaAsync();
+        var id = await PostulacionAsync(EstadoPostulacion.EnProceso, diasSinActividad: 70);
 
-        await ConPostulacionAsync(id, EstadoPostulacion.Descartado);
-        await InactivaDesdeHaceAsync(id, TimeSpan.FromDays(120));
+        await _entorno.Barrido.ProcesarPostulacionAsync(id);
 
-        await _entorno.Barrido.ProcesarConversacionAsync(id);
-
-        var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == id);
-        Assert.Equal(EstadoConversacion.Archivada, conversacion.Estado);
+        Assert.Equal(0, await AvisosDeArchivadoAsync());
+        Assert.Null((await LeerAsync(id)).FechaAvisoArchivado);
     }
 
+    /// <summary>Una descartada ya no necesita que alguien la rescate: se archiva sin aviso previo.</summary>
     [Fact]
-    public async Task Un_hilo_muerto_se_archiva_en_vez_de_escalarse()
+    public async Task Una_descartada_no_recibe_aviso_previo()
     {
-        // Las dos reglas corren sobre el mismo disparador y ambas calzan: sin la prioridad de la
-        // 16 sobre la 2, el respaldo recibiria una conversacion de hace tres meses.
-        var id = await ConversacionAsignadaAsync();
+        var id = await PostulacionAsync(EstadoPostulacion.Descartado, diasSinActividad: 84);
 
-        await InactivaDesdeHaceAsync(id, TimeSpan.FromDays(120));
+        await _entorno.Barrido.ProcesarPostulacionAsync(id);
 
-        await _entorno.Barrido.ProcesarConversacionAsync(id);
-
-        var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == id);
-
-        Assert.Equal(EstadoConversacion.Archivada, conversacion.Estado);
-        Assert.Equal(EntornoDeReglas.TitularId, conversacion.AnalistaAtendiendoId);
+        Assert.Equal(0, await AvisosDeArchivadoAsync());
     }
 
     public void Dispose() => _entorno.Dispose();

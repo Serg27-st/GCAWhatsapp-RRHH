@@ -56,6 +56,9 @@ public class RegistroDependenciasTests
         Assert.NotNull(sp.GetRequiredService<EjecutorAcciones>());
         Assert.NotNull(sp.GetRequiredService<IFabricaContextoRegla>());
         Assert.NotNull(sp.GetRequiredService<IMotorReglas>());
+
+        // V33: sin esto el bucle del Worker arranca y falla en cada vuelta al pedir el caso de uso.
+        Assert.NotNull(sp.GetRequiredService<DescargaAdjuntos>());
     }
 
     [Theory]
@@ -73,6 +76,7 @@ public class RegistroDependenciasTests
     [InlineData(typeof(IPostulanteService))]
     [InlineData(typeof(IPostulacionService))]
     [InlineData(typeof(IAlmacenamientoCv))]
+    [InlineData(typeof(IAlmacenamientoAdjuntos))]
     [InlineData(typeof(IWhatsAppProvider))]
     public void Cada_servicio_de_dominio_que_el_motor_necesita_esta_registrado(Type tipo)
     {
@@ -90,12 +94,15 @@ public class RegistroDependenciasTests
 
         var reglas = ambito.ServiceProvider.GetServices<IReglaNegocio>().ToList();
 
-        // La Regla 9 son cuatro clases: envio del enlace, confirmacion, seguimiento y repregunta.
-        // Responden a disparadores distintos, asi que hay mas reglas registradas que codigos.
-        Assert.Equal(13, reglas.Count);
+        // Varias reglas del dossier son mas de una clase: la 9 son cuatro (enlace, confirmacion,
+        // seguimiento y repregunta), la 2 son dos (escalamiento y segundo nivel, FUN-05) y la 19 son
+        // tres (menu, derivacion por silencio y aviso de «Sin clasificar», FUN-06) y la 16 son tres
+        // (por postulacion, por hilo y la reactivacion, FUN-11). Responden a
+        // disparadores o a momentos distintos, asi que hay mas reglas registradas que codigos.
+        Assert.Equal(20, reglas.Count);
 
         Assert.Equal(
-            ["R01", "R02", "R03", "R09", "R12", "R14", "R15", "R16", "R19", "R20"],
+            ["R01", "R02", "R03", "R06", "R08", "R09", "R12", "R14", "R15", "R16", "R19", "R20"],
             reglas.Select(r => r.Codigo).Distinct().OrderBy(c => c).ToArray());
     }
 

@@ -37,6 +37,8 @@
 
         <TransferenciasRecibidas Pendientes="_transferencias" AlResponder="AlResponderTransferencia" />
 
+        <TransferenciasEnviadas Enviadas="_enviadas" AlRetirar="RefrescarTodo" />
+
         <div class="pestanas">
             <button class="@(_vista == Vista.Mias ? "activa" : "")" @onclick="() => Cambiar(Vista.Mias)">
                 Mis conversaciones
@@ -70,6 +72,7 @@
 
     private IReadOnlyList<ConversacionResumen> _conversaciones = [];
     private IReadOnlyList<TransferenciaPendiente> _transferencias = [];
+    private IReadOnlyList<TransferenciaEnviada> _enviadas = [];
     private ConversacionDetalle? _detalle;
     private Vista _vista = Vista.Mias;
     private int? _seleccionadaId;
@@ -205,8 +208,10 @@
         };
 
         // Regla 8: se trae en cada vuelta, en cualquier pestana. Lo que espera respuesta tiene que
-        // estar a la vista aunque el analista este mirando otra cosa.
+        // estar a la vista aunque el analista este mirando otra cosa. Lo enviado va junto: es donde
+        // se retira lo que ya no corresponde (FUN-07).
         _transferencias = await Api.TransferenciasPendientesAsync();
+        _enviadas = await Api.TransferenciasEnviadasAsync();
 
         _cargando = false;
         StateHasChanged();

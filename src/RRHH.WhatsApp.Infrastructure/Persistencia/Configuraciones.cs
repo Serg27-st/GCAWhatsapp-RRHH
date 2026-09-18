@@ -30,6 +30,11 @@ public class AnalistaConfig : IEntityTypeConfiguration<Analista>
         b.Property(x => x.Email).HasMaxLength(200).IsRequired();
         b.Property(x => x.Rol).HasConversion<int>();
         b.Property(x => x.HashContrasena).HasMaxLength(400);
+
+        // ARQ-11 (V34): los analistas que ya existen arrancan en 1, como los nuevos; lo que importa es
+        // que el token traiga la misma version que la fila, no el numero en si.
+        b.Property(x => x.VersionSeguridad).HasDefaultValue(1);
+
         b.HasIndex(x => x.Email).IsUnique();
     }
 }
@@ -106,6 +111,12 @@ public class HcConfig : IEntityTypeConfiguration<Hc>
 
         // Regla 20: el bot filtra vacantes abiertas por cuenta en cada menu.
         b.HasIndex(x => new { x.CuentaId, x.Estado });
+
+        // A6: el codigo del aviso identifica la vacante desde el primer mensaje, asi que no puede repetirse.
+        b.Property(x => x.CodigoAviso).HasMaxLength(12);
+        b.HasIndex(x => x.CodigoAviso, "IX_HC_CodigoAviso")
+            .IsUnique()
+            .HasFilter("[CodigoAviso] IS NOT NULL");
 
         b.HasOne(x => x.Cuenta).WithMany(x => x.Vacantes)
             .HasForeignKey(x => x.CuentaId).OnDelete(DeleteBehavior.Restrict);
@@ -204,6 +215,7 @@ public class EtapaKanbanConfig : IEntityTypeConfiguration<EtapaKanban>
         b.HasKey(x => x.EtapaId);
         b.Property(x => x.Nombre).HasMaxLength(100).IsRequired();
         b.HasIndex(x => x.Orden).IsUnique();
+        b.Property(x => x.EstadoResultante).HasConversion<int?>();
     }
 }
 
@@ -227,6 +239,10 @@ public class ConversacionConfig : IEntityTypeConfiguration<Conversacion>
 
         // Bandeja del analista.
         b.HasIndex(x => new { x.AnalistaAtendiendoId, x.Estado });
+
+        // Barridos por estado y antigüedad (V30): el plazo de «Sin clasificar», la derivacion por
+        // silencio del menu y el archivado miran el estado y cuanto hace que no hay actividad.
+        b.HasIndex(x => new { x.Estado, x.FechaUltimaActividad }, "IX_Conversaciones_EstadoActividad");
 
         b.HasOne(x => x.Postulante).WithMany()
             .HasForeignKey(x => x.PostulanteId).OnDelete(DeleteBehavior.Restrict);
@@ -267,12 +283,53 @@ public class MensajeConfig : IEntityTypeConfiguration<Mensaje>
             .HasFilter("[ProximoIntentoUtc] IS NOT NULL")
             .HasDatabaseName("IX_Mensajes_PendientesDeReintento");
 
+        // Cola de envios (V29). Nombres explicitos en los indices: EF identifica un indice por sus
+        // columnas, y dos sobre las mismas colisionan (V17 documento una migracion que borraba uno).
+        b.Property(x => x.TipoSaliente).HasConversion<int>().HasDefaultValue(Domain.Enums.TipoSaliente.Texto);
+        b.Property(x => x.OpcionesJson).HasColumnType("nvarchar(max)");
+        b.Property(x => x.ClaveIdempotencia).HasMaxLength(150);
+        b.Property(x => x.FechaTomaEnvio);
+
+        // La garantia real de no duplicar: el mismo envio decidido dos veces choca aca.
+        b.HasIndex(x => x.ClaveIdempotencia, "IX_Mensajes_ClaveIdempotencia")
+            .IsUnique()
+            .HasFilter("[ClaveIdempotencia] IS NOT NULL");
+
+        // El despachador solo mira lo encolado, en orden de llegada.
+        b.HasIndex(x => new { x.EstadoEntrega, x.FechaEnvio }, "IX_Mensajes_EnCola")
+            .HasFilter("[EstadoEntrega] = 6");
+
         b.HasOne(x => x.Conversacion).WithMany(x => x.Mensajes)
             .HasForeignKey(x => x.ConversacionId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.Plantilla).WithMany()
             .HasForeignKey(x => x.PlantillaId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Analista).WithMany()
             .HasForeignKey(x => x.AnalistaId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class MensajeAdjuntoConfig : IEntityTypeConfiguration<MensajeAdjunto>
+{
+    public void Configure(EntityTypeBuilder<MensajeAdjunto> b)
+    {
+        b.ToTable("MensajesAdjuntos");
+        b.HasKey(x => x.AdjuntoId);
+        b.Property(x => x.TipoMedio).HasMaxLength(20).IsRequired();
+        b.Property(x => x.ProveedorMedioId).HasMaxLength(150).IsRequired();
+        b.Property(x => x.MimeType).HasMaxLength(100).IsRequired();
+        b.Property(x => x.NombreArchivo).HasMaxLength(255);
+        b.Property(x => x.Ruta).HasMaxLength(500);
+        b.Property(x => x.Error).HasMaxLength(500);
+        b.Property(x => x.Estado).HasConversion<int>();
+
+        // V33: el Worker baja lo pendiente en orden de llegada —el id de medio caduca— y la purga de la
+        // Regla 17 recorre lo descargado por fecha. Las dos preguntas empiezan por el estado.
+        b.HasIndex(x => new { x.Estado, x.FechaRecepcion }, "IX_MensajesAdjuntos_Estado_FechaRecepcion");
+
+        // Un adjunto no existe sin su mensaje: si el mensaje se borra, el archivo no puede quedar
+        // registrado sin dueño y fuera del alcance de la purga.
+        b.HasOne(x => x.Mensaje).WithMany(x => x.Adjuntos)
+            .HasForeignKey(x => x.MensajeId).OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -288,6 +345,17 @@ public class TransferenciaConfig : IEntityTypeConfiguration<Transferencia>
 
         // Regla 8: bandeja de transferencias pendientes de aceptar.
         b.HasIndex(x => new { x.AnalistaDestinoId, x.Estado });
+
+        // Regla 8, de uno en uno: una sola pendiente por conversacion. La comprobacion del servicio no ve
+        // dos pedidos simultaneos; el indice si.
+        b.HasIndex(x => x.ConversacionId, "IX_Transferencias_PendienteUnica")
+            .IsUnique()
+            .HasFilter("[Estado] = 1");
+
+        // El indice de la clave foranea, sin filtro, con nombre explicito. Sin declararlo, EF toma el
+        // filtrado de arriba como indice de la FK y borra este en la migracion: las consultas por
+        // conversacion en cualquier otro estado, y el borrado en cascada, se quedarian sin indice (V17).
+        b.HasIndex(x => x.ConversacionId, "IX_Transferencias_ConversacionId");
 
         b.HasOne(x => x.Conversacion).WithMany()
             .HasForeignKey(x => x.ConversacionId).OnDelete(DeleteBehavior.Cascade);
@@ -349,6 +417,13 @@ public class JobFormsRespuestaConfig : IEntityTypeConfiguration<JobFormsRespuest
         b.Property(x => x.VersionAvisoPrivacidad).HasMaxLength(50);
         b.HasIndex(x => new { x.PostulanteId, x.HcId });
 
+        // B9: una respuesta por invitacion. La idempotencia del envio (V27) lo resolvia en el servicio,
+        // pero dos reintentos simultaneos del Apps Script podian guardar dos. El filtro deja convivir
+        // las respuestas sin invitacion.
+        b.HasIndex(x => x.InvitacionId, "IX_JobFormsRespuestas_Invitacion")
+            .IsUnique()
+            .HasFilter("[InvitacionId] IS NOT NULL");
+
         b.HasOne(x => x.Invitacion).WithMany()
             .HasForeignKey(x => x.InvitacionId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Postulante).WithMany()
@@ -369,8 +444,9 @@ public class EventoSistemaConfig : IEntityTypeConfiguration<EventoSistema>
         b.Property(x => x.Estado).HasConversion<int>();
         b.Property(x => x.UltimoError).HasMaxLength(2000);
 
-        // Consulta principal del Worker sobre la outbox.
-        b.HasIndex(x => new { x.Estado, x.FechaCreacion });
+        // Consulta principal del Worker sobre la outbox (ARQ-13). Incluye el tipo porque cada consumidor
+        // pide solo los suyos (V9): sin el, la consulta recorria los pendientes de todos los tipos.
+        b.HasIndex(x => new { x.Estado, x.Tipo, x.FechaCreacion }, "IX_EventosSistema_Cola");
         b.HasIndex(x => x.CorrelationId);
     }
 }
@@ -384,6 +460,27 @@ public class ConfiguracionReglaConfig : IEntityTypeConfiguration<ConfiguracionRe
         b.Property(x => x.Clave).HasMaxLength(100);
         b.Property(x => x.Valor).HasMaxLength(500).IsRequired();
         b.Property(x => x.Descripcion).HasMaxLength(500);
+    }
+}
+
+public class AlertaOperativaConfig : IEntityTypeConfiguration<AlertaOperativa>
+{
+    public void Configure(EntityTypeBuilder<AlertaOperativa> b)
+    {
+        b.ToTable("AlertasOperativas");
+        b.HasKey(x => x.AlertaId);
+        b.Property(x => x.Tipo).HasMaxLength(60).IsRequired();
+        b.Property(x => x.Clave).HasMaxLength(150).IsRequired();
+        b.Property(x => x.Detalle).HasMaxLength(1000);
+
+        // V32: una sola alerta abierta por (Tipo, Clave). Las resueltas quedan como historial y no
+        // cuentan: si el problema vuelve, es una alerta nueva.
+        b.HasIndex(x => new { x.Tipo, x.Clave }, "IX_AlertasOperativas_AbiertaUnica")
+            .IsUnique()
+            .HasFilter("[FechaResuelta] IS NULL");
+
+        b.HasOne<Analista>().WithMany()
+            .HasForeignKey(x => x.ResueltaPorAnalistaId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 

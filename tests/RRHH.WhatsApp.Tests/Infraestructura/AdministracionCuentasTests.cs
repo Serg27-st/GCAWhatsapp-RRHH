@@ -26,8 +26,8 @@ public class AdministracionCuentasTests : IDisposable
 
         _db.Database.EnsureCreated();
 
-        _cuentas = new CuentaService(_db, TimeProvider.System);
-        _analistas = new AnalistaService(_db);
+        _cuentas = new CuentaService(_db, new AlertaOperativaService(_db, TimeProvider.System), TimeProvider.System);
+        _analistas = ServiciosDePrueba.Analistas(_db);
     }
 
     private Task<Analista> AnalistaAsync(string nombre, string email) =>
@@ -193,6 +193,99 @@ public class AdministracionCuentasTests : IDisposable
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => _cuentas.AsignarAnalistaAsync(cuenta.CuentaId, quien.AnalistaId, esBackup: false));
+    }
+
+
+    /// <summary>
+    /// COR-09 (AL5): el menu del bot solo puede ofrecer lo que lleva a alguna parte. Una cuenta sin
+    /// titular deja la conversacion sin dueño, y una vacante sin formulario, sin enlace que mandar.
+    /// </summary>
+    [Fact]
+    public async Task El_menu_deja_fuera_las_cuentas_sin_titular_activo()
+    {
+        var conTitular = await ConCuentaListaAsync("Alicorp", "ana@gca.pe");
+
+        var sinTitular = await _cuentas.CrearAsync("Intradevco");
+        await _cuentas.CrearVacanteAsync(sinTitular.CuentaId, "Envasador", "https://forms.gle/envasador", 1);
+
+        var menu = await _cuentas.ListarMenuAsync();
+
+        Assert.Equal([conTitular.CuentaId], menu.Select(c => c.CuentaId));
+    }
+
+    [Fact]
+    public async Task El_menu_deja_fuera_las_cuentas_cuyo_titular_ya_no_trabaja_aca()
+    {
+        var cuenta = await ConCuentaListaAsync("Alicorp", "ana@gca.pe");
+
+        var titular = await _db.Analistas.FirstAsync(a => a.Email == "ana@gca.pe");
+        titular.Activo = false;
+        await _db.SaveChangesAsync();
+
+        Assert.Empty(await _cuentas.ListarMenuAsync());
+    }
+
+    [Fact]
+    public async Task El_menu_deja_fuera_las_vacantes_sin_formulario_cargado()
+    {
+        var cuenta = await _cuentas.CrearAsync("Alicorp");
+        var titular = await AnalistaAsync("Ana Torres", "ana@gca.pe");
+        await _cuentas.AsignarAnalistaAsync(cuenta.CuentaId, titular.AnalistaId, esBackup: false);
+
+        await _cuentas.CrearVacanteAsync(cuenta.CuentaId, "Operario", urlJobForms: null, titular.AnalistaId);
+
+        Assert.Empty(await _cuentas.ListarMenuAsync());
+    }
+
+    [Fact]
+    public async Task El_menu_deja_fuera_las_cuentas_desactivadas()
+    {
+        var cuenta = await ConCuentaListaAsync("Alicorp", "ana@gca.pe");
+
+        var fila = await _db.Cuentas.FirstAsync(c => c.CuentaId == cuenta.CuentaId);
+        fila.Activo = false;
+        await _db.SaveChangesAsync();
+
+        Assert.Empty(await _cuentas.ListarMenuAsync());
+    }
+
+    /// <summary>
+    /// V32: una vacante abierta sin formulario no se puede rechazar —el analista todavia no tiene el
+    /// enlace de Google— pero tampoco puede quedar en silencio: el postulante no recibiria nada.
+    /// </summary>
+    [Fact]
+    public async Task Crear_una_vacante_sin_formulario_deja_una_alerta_operativa()
+    {
+        var cuenta = await _cuentas.CrearAsync("Alicorp");
+
+        var vacante = await _cuentas.CrearVacanteAsync(cuenta.CuentaId, "Operario", "   ", 1);
+
+        var alerta = Assert.Single(await _db.AlertasOperativas.AsNoTracking().ToListAsync());
+
+        Assert.Equal(TiposAlerta.VacanteSinFormulario, alerta.Tipo);
+        Assert.Equal($"hc:{vacante.HcId}", alerta.Clave);
+    }
+
+    [Fact]
+    public async Task Crear_una_vacante_con_formulario_no_deja_alerta()
+    {
+        var cuenta = await _cuentas.CrearAsync("Alicorp");
+
+        await _cuentas.CrearVacanteAsync(cuenta.CuentaId, "Operario", "https://forms.gle/operario", 1);
+
+        Assert.Empty(_db.AlertasOperativas);
+    }
+
+    /// <summary>Una cuenta activa, con titular y con una vacante abierta con formulario: lista para el menu.</summary>
+    private async Task<Cuenta> ConCuentaListaAsync(string nombre, string email)
+    {
+        var cuenta = await _cuentas.CrearAsync(nombre);
+        var titular = await AnalistaAsync($"Titular de {nombre}", email);
+
+        await _cuentas.AsignarAnalistaAsync(cuenta.CuentaId, titular.AnalistaId, esBackup: false);
+        await _cuentas.CrearVacanteAsync(cuenta.CuentaId, "Operario", "https://forms.gle/operario", titular.AnalistaId);
+
+        return cuenta;
     }
 
     public void Dispose() => _db.Dispose();

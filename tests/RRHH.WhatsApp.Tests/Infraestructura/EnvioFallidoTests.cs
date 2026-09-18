@@ -31,7 +31,7 @@ public class EnvioFallidoTests : IDisposable
         _db.Database.EnsureCreated();
 
         _mensajes = new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance);
-        _conversaciones = new ConversacionService(_db, TimeProvider.System, NullLogger<ConversacionService>.Instance);
+        _conversaciones = ServiciosDePrueba.Conversaciones(_db, TimeProvider.System);
     }
 
     private async Task<long> CrearSalienteSinIdDeProveedorAsync()

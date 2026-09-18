@@ -84,9 +84,19 @@ public sealed class JobFormsService(
     {
         var limite = reloj.GetUtcNow().UtcDateTime.AddDays(-diasRetencion);
 
+        // A5 (FUN-16): el plazo corre desde la ultima actividad de la persona, no desde que mando el
+        // formulario. Borrar el CV de alguien que sigue en un proceso —o que volvio la semana pasada—
+        // seria perder el dato justo cuando hace falta.
         return await db.JobFormsRespuestas
             .AsNoTracking()
-            .Where(r => r.CvUrl != null && r.FechaEnvio <= limite)
+            .Where(r => r.CvUrl != null
+                     && r.FechaEnvio <= limite
+                     && !db.Postulaciones.Any(p =>
+                            p.PostulanteId == r.PostulanteId
+                            && (p.Estado == EstadoPostulacion.EnProceso
+                                || p.Estado == EstadoPostulacion.Reingreso
+                                || p.Estado == EstadoPostulacion.Contratado
+                                || p.FechaUltimaActividad > limite)))
             .OrderBy(r => r.FechaEnvio)
             .Take(maximo)
             .ToListAsync(ct);

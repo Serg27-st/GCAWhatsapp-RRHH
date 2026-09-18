@@ -11,6 +11,11 @@ namespace RRHH.WhatsApp.Application.Reglas.Implementaciones;
 /// tiene varias, primero hay que preguntar a cual, porque el formulario y sus preguntas son por
 /// HC y no por cliente.
 /// </para>
+/// <para>
+/// El menu de vacantes se ofrece una sola vez (COR-02, C2): quien ya eligio —o ya completo el
+/// formulario, o ya tiene un proceso vivo en la cuenta— esta conversando, y repetirle el menu en
+/// cada mensaje es el ruido que termina en reportes de spam (P4).
+/// </para>
 /// </summary>
 public sealed class R09EnvioLink : IReglaNegocio
 {
@@ -25,20 +30,41 @@ public sealed class R09EnvioLink : IReglaNegocio
         ctx.Disparador == TipoDisparador.MensajeEntrante
         && ctx.Conversacion is not null
         && ctx.Cuenta is not null
-        && ctx.VacantesAbiertas.Count > 0;
+        && ctx.VacantesAbiertas.Count > 0
+        // Un hilo que ya atiende una persona sobre un proceso vivo de esta cuenta no es trabajo del
+        // bot: lo que el postulante escriba ahi va para el analista, no para el menu.
+        && !(ctx.Conversacion is { Estado: EstadoConversacion.Activa, AnalistaAtendiendoId: not null }
+             && ctx.CuentasVivas.Contains(ctx.Cuenta.CuentaId));
 
     public Task<ResultadoRegla> EvaluarAsync(ContextoRegla ctx, CancellationToken ct = default)
     {
         var cuenta = ctx.Cuenta!;
 
-        // La vacante elegida por boton manda. Si no eligio y hay una sola abierta, no tiene sentido
-        // preguntarle cual.
-        var vacante = ctx.Hc is { Estado: EstadoHc.Abierta } elegida
-            ? elegida
-            : ctx.VacantesAbiertas.Count == 1 ? ctx.VacantesAbiertas[0] : null;
+        // Solo cuenta como eleccion la que hizo el postulante en este mensaje: un boton o el codigo
+        // de aviso. La vacante que quedo en el contexto de un mensaje anterior no autoriza a
+        // mandarle otra vez nada (AL2).
+        var eligioAhora = ctx.OrigenEleccion is OrigenEleccion.Boton or OrigenEleccion.CodigoAviso;
+
+        var vacante = eligioAhora && ctx.Hc is { Estado: EstadoHc.Abierta } elegida ? elegida : null;
 
         if (vacante is null)
-            return Task.FromResult(ResultadoRegla.Con(new MostrarMenuVacantes(cuenta.CuentaId)));
+        {
+            // Ya esta conversando sobre alguna vacante de la cuenta: con invitacion enviada o con un
+            // proceso vivo. No hay nada que ofrecerle.
+            var yaEmpezo =
+                ctx.HcsConInvitacion.Any(hcId => ctx.VacantesAbiertas.Any(v => v.HcId == hcId))
+                || ctx.CuentasVivas.Contains(cuenta.CuentaId);
+
+            if (yaEmpezo)
+                return Task.FromResult(ResultadoRegla.SinAccion);
+
+            // Con varias vacantes hay que preguntar cual; con una sola, preguntar seria un menu de
+            // una opcion.
+            if (ctx.VacantesAbiertas.Count > 1)
+                return Task.FromResult(ResultadoRegla.Con(new MostrarMenuVacantes(cuenta.CuentaId)));
+
+            vacante = ctx.VacantesAbiertas[0];
+        }
 
         // Ya se le mando el enlace de esta vacante en este hilo. Repetirlo en cada mensaje es
         // ruido, y despues de que completo el formulario ademas seria confuso.

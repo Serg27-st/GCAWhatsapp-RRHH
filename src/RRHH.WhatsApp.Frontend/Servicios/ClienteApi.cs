@@ -14,6 +14,27 @@ public sealed record RespuestaApi(bool Exito, string? Motivo)
 }
 
 /// <summary>
+/// FUN-14: un archivo que sirve la Api, sin cargarlo entero en memoria. Quien lo recibe lo cierra:
+/// detras queda la respuesta HTTP abierta.
+/// </summary>
+public sealed class ArchivoDeLaApi(HttpResponseMessage respuesta, Stream contenido) : IAsyncDisposable
+{
+    public Stream Contenido => contenido;
+
+    /// <summary>El nombre con el que la Api lo manda a guardar.</summary>
+    public string Nombre =>
+        respuesta.Content.Headers.ContentDisposition?.FileNameStar
+        ?? respuesta.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+        ?? "archivo";
+
+    public async ValueTask DisposeAsync()
+    {
+        await contenido.DisposeAsync();
+        respuesta.Dispose();
+    }
+}
+
+/// <summary>
 /// Unico punto por el que el Frontend habla con la Api. Concentrarlo aca es lo que mantiene a las
 /// pantallas sin saber de HTTP, y lo que hace que agregar autenticacion mas adelante sea tocar un
 /// solo archivo.
@@ -63,6 +84,51 @@ public sealed class ClienteApi(HttpClient http, SesionAnalista sesion, ILogger<C
     public Task<ConversacionDetalle?> DetalleAsync(int conversacionId, CancellationToken ct = default) =>
         LeerAsync<ConversacionDetalle>($"conversaciones/{conversacionId}", ct);
 
+    /// <summary>
+    /// FUN-14: el archivo que mando el postulante. Lo pide el circuito y no el navegador, porque el
+    /// token del analista vive solo aca: el navegador no lo lleva en una descarga comun.
+    /// </summary>
+    public async Task<ArchivoDeLaApi?> AdjuntoAsync(
+        int conversacionId, long adjuntoId, CancellationToken ct = default)
+    {
+        HttpResponseMessage? respuesta = null;
+
+        try
+        {
+            Autenticar();
+
+            respuesta = await http.GetAsync(
+                $"conversaciones/{conversacionId}/adjuntos/{adjuntoId}",
+                HttpCompletionOption.ResponseHeadersRead,
+                ct);
+
+            if (!respuesta.IsSuccessStatusCode)
+            {
+                log.LogWarning("La Api no entrego el adjunto {AdjuntoId}: {Codigo}.",
+                    adjuntoId, (int)respuesta.StatusCode);
+
+                return null;
+            }
+
+            var archivo = new ArchivoDeLaApi(respuesta, await respuesta.Content.ReadAsStreamAsync(ct));
+
+            // Desde aca la respuesta la cierra el archivo, cuando quien lo recibe termine de leerlo.
+            respuesta = null;
+
+            return archivo;
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "Fallo la descarga del adjunto {AdjuntoId}.", adjuntoId);
+
+            return null;
+        }
+        finally
+        {
+            respuesta?.Dispose();
+        }
+    }
+
     public Task<IReadOnlyList<PlantillaResumen>> PlantillasAsync(CancellationToken ct = default) =>
         LeerListaAsync<PlantillaResumen>("plantillas", ct);
 
@@ -106,6 +172,13 @@ public sealed class ClienteApi(HttpClient http, SesionAnalista sesion, ILogger<C
     public Task<RespuestaApi> MarcarAsync(int conversacionId, PeticionMarcar peticion, CancellationToken ct = default) =>
         EnviarAsync($"conversaciones/{conversacionId}/marcar", peticion, ct);
 
+    /// <summary>
+    /// FUN-01: el analista se adjudica un hilo de «Sin clasificar» para una de sus cuentas. Si otro lo
+    /// tomo primero, la Api responde 409 y el motivo llega en <see cref="RespuestaApi.Motivo"/>.
+    /// </summary>
+    public Task<RespuestaApi> TomarAsync(int conversacionId, int cuentaId, CancellationToken ct = default) =>
+        EnviarAsync($"conversaciones/{conversacionId}/tomar", new PeticionTomar(cuentaId), ct);
+
     public Task<RespuestaApi> TransferirAsync(
         int conversacionId, PeticionTransferir peticion, CancellationToken ct = default) =>
         EnviarAsync($"conversaciones/{conversacionId}/transferir", peticion, ct);
@@ -118,9 +191,20 @@ public sealed class ClienteApi(HttpClient http, SesionAnalista sesion, ILogger<C
         int transferenciaId, bool aceptada, CancellationToken ct = default) =>
         EnviarAsync($"transferencias/{transferenciaId}/responder", new PeticionResponderTransferencia(aceptada), ct);
 
+    /// <summary>FUN-07: lo que el analista ofrecio y sigue esperando respuesta.</summary>
+    public Task<IReadOnlyList<TransferenciaEnviada>> TransferenciasEnviadasAsync(CancellationToken ct = default) =>
+        LeerListaAsync<TransferenciaEnviada>("transferencias/enviadas", ct);
+
+    public Task<RespuestaApi> RetirarTransferenciaAsync(int transferenciaId, CancellationToken ct = default) =>
+        EnviarSinCuerpoAsync(HttpMethod.Post, $"transferencias/{transferenciaId}/retirar", ct);
+
     public Task<RespuestaApi> MoverEtapaAsync(
         int postulacionId, PeticionMoverEtapa peticion, CancellationToken ct = default) =>
         EnviarAsync($"postulaciones/{postulacionId}/etapa", peticion, ct);
+
+    /// <summary>FUN-08 (A2): la persona vuelve a un proceso vivo y su tarjeta sale de la columna final.</summary>
+    public Task<RespuestaApi> MarcarReingresoAsync(int postulacionId, CancellationToken ct = default) =>
+        EnviarSinCuerpoAsync(HttpMethod.Post, $"postulaciones/{postulacionId}/reingreso", ct);
 
     // Administracion (V23). Quien puede que lo decide la Api; estos metodos solo traen su respuesta,
     // incluido el motivo cuando dice que no.
@@ -130,6 +214,10 @@ public sealed class ClienteApi(HttpClient http, SesionAnalista sesion, ILogger<C
 
     public Task<RespuestaApi> RestablecerContrasenaAsync(int analistaId, string nueva, CancellationToken ct = default) =>
         EnviarAsync(HttpMethod.Put, $"sesion/analistas/{analistaId}/contrasena", new PeticionRestablecerContrasena(nueva), ct);
+
+    /// <summary>FUN-18: deja sin efecto los tokens que ese analista tenga abiertos, sin tocar su contraseña.</summary>
+    public Task<RespuestaApi> CerrarSesionesAsync(int analistaId, CancellationToken ct = default) =>
+        EnviarSinCuerpoAsync(HttpMethod.Post, $"sesion/analistas/{analistaId}/cerrar-sesiones", ct);
 
     public Task<IReadOnlyList<CuentaDetalle>> CuentasAsync(CancellationToken ct = default) =>
         LeerListaAsync<CuentaDetalle>("cuentas", ct);
@@ -146,6 +234,15 @@ public sealed class ClienteApi(HttpClient http, SesionAnalista sesion, ILogger<C
     public Task<RespuestaApi> CrearAnalistaAsync(PeticionCrearAnalista peticion, CancellationToken ct = default) =>
         EnviarAsync("analistas", peticion, ct);
 
+    /// <summary>FUN-19: lo que ese analista tiene encima, para mostrarlo antes de darlo de baja.</summary>
+    public Task<CarteraAnalista?> CarteraAsync(int analistaId, CancellationToken ct = default) =>
+        LeerAsync<CarteraAnalista>($"analistas/{analistaId}/cartera", ct);
+
+    /// <summary>FUN-19: lo que viene nulo no se toca; se manda solo lo que cambia.</summary>
+    public Task<RespuestaApi> EditarAnalistaAsync(
+        int analistaId, PeticionEditarAnalista peticion, CancellationToken ct = default) =>
+        EnviarAsync(HttpMethod.Patch, $"analistas/{analistaId}", peticion, ct);
+
     public Task<IReadOnlyList<AusenciaResumen>> AusenciasAsync(int analistaId, CancellationToken ct = default) =>
         LeerListaAsync<AusenciaResumen>($"analistas/{analistaId}/ausencias", ct);
 
@@ -155,14 +252,32 @@ public sealed class ClienteApi(HttpClient http, SesionAnalista sesion, ILogger<C
     public Task<RespuestaApi> CancelarAusenciaAsync(int analistaId, int ausenciaId, CancellationToken ct = default) =>
         EnviarSinCuerpoAsync(HttpMethod.Delete, $"analistas/{analistaId}/ausencias/{ausenciaId}", ct);
 
-    public Task<IReadOnlyList<VacanteResumen>> VacantesAsync(int cuentaId, CancellationToken ct = default) =>
-        LeerListaAsync<VacanteResumen>($"hc?cuentaId={cuentaId}", ct);
+    public Task<IReadOnlyList<VacanteResumen>> VacantesAsync(
+        int cuentaId, bool incluirCerradas = false, CancellationToken ct = default) =>
+        LeerListaAsync<VacanteResumen>($"hc?cuentaId={cuentaId}&incluirCerradas={incluirCerradas}", ct);
 
     public Task<RespuestaApi> CrearVacanteAsync(PeticionCrearVacante peticion, CancellationToken ct = default) =>
         EnviarAsync("hc", peticion, ct);
 
     public Task<RespuestaApi> CerrarVacanteAsync(int hcId, CancellationToken ct = default) =>
         EnviarSinCuerpoAsync(HttpMethod.Patch, $"hc/{hcId}/cerrar", ct);
+
+    /// <summary>FUN-20: corregir título, enlace del formulario o código de aviso. Lo nulo no se toca.</summary>
+    public Task<RespuestaApi> EditarVacanteAsync(
+        int hcId, PeticionEditarVacante peticion, CancellationToken ct = default) =>
+        EnviarAsync(HttpMethod.Patch, $"hc/{hcId}", peticion, ct);
+
+    public Task<RespuestaApi> ReabrirVacanteAsync(int hcId, CancellationToken ct = default) =>
+        EnviarSinCuerpoAsync(HttpMethod.Patch, $"hc/{hcId}/reabrir", ct);
+
+    /// <summary>FUN-20: corregir el nombre de una cuenta o desactivarla.</summary>
+    public Task<RespuestaApi> EditarCuentaAsync(
+        int cuentaId, PeticionEditarCuenta peticion, CancellationToken ct = default) =>
+        EnviarAsync(HttpMethod.Patch, $"cuentas/{cuentaId}", peticion, ct);
+
+    /// <summary>FUN-02: el codigo del aviso de la vacante y el enlace de WhatsApp que lo lleva escrito.</summary>
+    public Task<EnlaceAviso?> EnlaceAvisoAsync(int hcId, CancellationToken ct = default) =>
+        LeerAsync<EnlaceAviso>($"hc/{hcId}/enlace-aviso", ct);
 
     public Task<IReadOnlyList<CampoOpcional>> CamposAsync(int hcId, CancellationToken ct = default) =>
         LeerListaAsync<CampoOpcional>($"hc/{hcId}/campos", ct);
@@ -175,6 +290,13 @@ public sealed class ClienteApi(HttpClient http, SesionAnalista sesion, ILogger<C
 
     public Task<RespuestaApi> GuardarHorarioAsync(int? cuentaId, IReadOnlyList<TramoHorario> tramos, CancellationToken ct = default) =>
         EnviarAsync(HttpMethod.Put, RutaHorario(cuentaId), tramos, ct);
+
+    /// <summary>FUN-15: lo que una persona tiene que arreglar, agrupado y con su contador.</summary>
+    public Task<IReadOnlyList<AlertaOperativaResumen>> AlertasAsync(CancellationToken ct = default) =>
+        LeerListaAsync<AlertaOperativaResumen>("operacion/alertas", ct);
+
+    public Task<RespuestaApi> ResolverAlertaAsync(int alertaId, CancellationToken ct = default) =>
+        EnviarSinCuerpoAsync(HttpMethod.Post, $"operacion/alertas/{alertaId}/resolver", ct);
 
     public Task<IReadOnlyList<ParametroRegla>> ParametrosAsync(CancellationToken ct = default) =>
         LeerListaAsync<ParametroRegla>("configuracion/reglas", ct);

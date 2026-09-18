@@ -18,16 +18,16 @@ Decisiones de diseño y desviaciones respecto del dossier: [`docs/decisiones.md`
 
 ```
 src/
-  RRHH.WhatsApp.Domain          entidades, enums, interfaces y las reglas de negocio como Strategy
-  RRHH.WhatsApp.Application     motor de reglas y casos de uso
+  RRHH.WhatsApp.Domain          entidades, enums, interfaces, calendario laboral y contratos de reglas
+  RRHH.WhatsApp.Application     las 20 reglas como Strategy, el motor y los casos de uso
   RRHH.WhatsApp.Contracts       DTOs compartidos entre Api y Frontend
-  RRHH.WhatsApp.Infrastructure  EF Core, adaptador de 360dialog, almacenamiento de CVs
-  RRHH.WhatsApp.Api             webhook + endpoints REST
-  RRHH.WhatsApp.Worker          lógica disparada por tiempo (2h, 24h, 48h, 90 días)
+  RRHH.WhatsApp.Infrastructure  EF Core, adaptadores de Meta y 360dialog, CVs y adjuntos
+  RRHH.WhatsApp.Api             webhook + endpoints REST + hub en vivo
+  RRHH.WhatsApp.Worker          lo disparado por tiempo: outbox, barrido, envíos, adjuntos, mantenimiento
   RRHH.WhatsApp.Reporting       modelo de solo lectura para las métricas de gerencia
   RRHH.WhatsApp.Frontend        bandeja del analista (Blazor Server)
 tests/
-  RRHH.WhatsApp.Tests           una prueba por regla de negocio
+  RRHH.WhatsApp.Tests           una prueba por regla, más los escenarios E01–E23 de punta a punta
 ```
 
 Dependencias: `Domain` no referencia a nadie. `Frontend` solo referencia `Contracts` y habla con
@@ -111,8 +111,10 @@ curl -X POST http://localhost:5087/sesion/arranque -H "Content-Type: application
 - **Configuración:** el horario de atención (Regla 3).
 
 `GET /cuentas` devuelve cada cuenta con su titular, su respaldo y sus vacantes abiertas: es la
-forma rápida de ver si falta algo. Una cuenta sin titular, o sin vacantes abiertas, no aparece en
-el menú del bot.
+forma rápida de ver si falta algo. El menú del bot solo ofrece cuentas **activas, con titular
+activo y con al menos una vacante abierta que tenga su formulario cargado**: las tres condiciones
+son la misma, que elegir esa opción lleve a alguna parte. Una vacante creada sin formulario queda
+como alerta operativa hasta que alguien le cargue la URL.
 
 Para probar el circuito sin WhatsApp, `scripts/probar-webhook-local.ps1` arma un payload con la
 forma exacta de la Cloud API y lo firma como lo firma Meta, así que ejercita el camino real
@@ -130,25 +132,29 @@ el log del Worker como `[SIMULADO]`.
 
 | Componente | Estado |
 |---|---|
-| Modelo de datos + migración inicial | listo — 20 tablas, semillas de etapas kanban, parámetros y plantillas |
+| Modelo de datos y migraciones | listo — 23 tablas, semillas de etapas kanban, parámetros y plantillas |
 | Contratos de dominio (Sección 9.3) | listo |
 | Motor de reglas | listo — conectado: el webhook encola, el Worker consume y ejecuta |
-| Reglas implementadas | 1, 2, 3, 7, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20 |
-| Reglas cubiertas sin clase propia | 4 (visibilidad, en la consulta de la bandeja), 5 (efecto de la 1 automática), 6 (aviso multi-cuenta en la R1 y en el detalle), 8 (transferencias, en el servicio), 10 (el bot se identifica en el menú), 11 (es el aviso de la 6) |
+| Reglas implementadas | 1, 2 (con segundo nivel), 3, 6 (desambiguación), 7, 8 (vencimiento), 9, 12, 13, 14, 15, 16 (por postulación, por hilo y reactivación), 17, 18, 19 (menú, derivación y plazo), 20 |
+| Reglas cubiertas sin clase propia | 4 (visibilidad, en la consulta de la bandeja), 5 (efecto de la 1 automática), 8 (alta y respuesta de transferencias, en el servicio), 10 (el bot se identifica en el menú), 11 (aviso de la 6 y prefijo multi-cuenta en la respuesta del analista) |
 | Reglas pendientes | ninguna — las 20 están cubiertas |
 | Adaptador 360dialog | listo — envío de texto, plantillas y botones, con límite de velocidad |
-| Webhook entrante | listo — firma, idempotencia, opt-in, outbox y acuses de entrega |
+| Webhook entrante | listo — firma, idempotencia, opt-in, outbox y acuses de entrega; cada mensaje entra con su evento en una sola transacción (V28); un acuse de fallo avisa en vivo a quien corresponde, una sola vez; los archivos (imagen, documento, audio, video, sticker) quedan registrados para descargar (V33) |
 | Servicios de dominio | listo — conversaciones, mensajes, postulantes, postulaciones, JobForms |
 | Circuito JobForms | listo — envío del enlace, webhook de Google, respuesta, CVs y confirmación |
-| Consumidor de la outbox | listo — lotes con reintentos; los eventos sin dueño quedan en cola |
-| Barrido por tiempo del Worker | listo — Reglas 2, 9 y 16 |
-| Purga de CVs (Regla 17) | listo — retención configurable y `DELETE /postulantes/{dni}` |
+| Consumidor de la outbox | listo — cada evento se confirma o se deshace entero con su marca de procesado (V28); una regla que falla aborta la evaluación y el evento se reintenta (V35); los eventos sin dueño quedan en cola |
+| Cola de envíos (V29) | listo — las reglas encolan con clave única y un despachador del Worker envía; reprocesar un evento no duplica |
+| Alertas operativas (V32) | listo — plantilla sin aprobar, vacante sin formulario, menú sin opciones, cuenta sin titular o sin respaldo, agrupadas; `/health` las muestra |
+| Barrido por tiempo del Worker | listo — por conversación (Reglas 2, 8, 9, 16 y 19) y por postulación (cierre de cortesía y archivado), cada una en su transacción; además, el aviso de retorno de ausencias |
+| Mantenimiento de datos (Regla 17, ARQ-13) | listo — purga diaria de CVs, de adjuntos por última actividad (A5) y de los eventos procesados de la outbox; más `DELETE /postulantes/{dni}` |
+| Archivos por WhatsApp (V33) | listo — el webhook los registra, el Worker los baja con el mismo antivirus que el CV, el analista los baja desde el chat y se purgan con la retención (A5) |
 | Reintento de envíos salientes | listo — por mensaje, solo lo transitorio, revalidando la Regla 15 |
 | Endpoints (Sección 9.4) | listo — bandeja, respuesta, transferencias, kanban, cuentas, analistas, HC, ausencias, plantillas, horario |
 | Contratos compartidos (`Contracts`) | listo — DTOs de bandeja y métricas, que es lo único que verá el Frontend |
-| Bandeja del analista (Blazor) | listo — lista por cuenta, chat, respuesta, acciones rápidas, kanban, métricas y administración por rol |
-| Reporting (Regla 18) | listo — modelo de solo lectura propio y `GET /reportes/metricas` |
-| Autenticación de analistas (Sección 9.6.1) | listo — JWT propio, el analista sale del token |
+| Bandeja del analista (Blazor) | listo — lista por cuenta, chat con estado de entrega y archivos, respuesta, acciones rápidas, kanban, métricas, alertas operativas y administración por rol |
+| Reporting (Regla 18) | listo — modelo de solo lectura propio y `GET /reportes/metricas`, medido por espera y en horas de atención |
+| Autenticación de analistas (Sección 9.6.1) | listo — JWT propio, el analista sale del token, y una versión de seguridad deja sin efecto los tokens de quien perdió el acceso (V34) |
+| Administración (V23, FUN-19/20) | listo — alta, edición y baja de analistas con reasignación de su cartera; edición, cierre y reapertura de vacantes; edición y desactivación de cuentas |
 | Tiempo real por SignalR (Sección 9.6.3) | listo — hub por analista, alimentado desde la outbox |
 
 El sistema elige proveedor solo, en este orden:
@@ -198,18 +204,18 @@ Lo que hay, contra la Sección 7 del dossier:
 | Pantalla | Cubre | Quién la ve |
 |---|---|---|
 | `/bandeja` | lista por cuenta, buscador por DNI, chat, respuesta, acciones rápidas y transferencias recibidas | todos |
-| `/vacantes` | vacantes de cada cuenta: crear, cerrar, campos del formulario y entrada al tablero | titular y respaldo de la cuenta, y Sistemas |
+| `/vacantes` | vacantes de cada cuenta: crear, editar, cerrar, reabrir, campos del formulario y entrada al tablero | titular y respaldo de la cuenta, y Sistemas |
 | `/tablero/{hcId}` | kanban por vacante, con columnas arrastrables (Regla 13) | titular y respaldo; Sistemas, sin mover tarjetas |
 | `/metricas` | panel de gerencia (Regla 18) | Jefatura y Sistemas |
-| `/equipo` | titular y respaldo de cada cuenta y ausencias de cualquiera; alta de cuentas y analistas y restablecer contraseñas, solo Sistemas | Jefatura y Sistemas |
-| `/configuracion` | horario de atención, parámetros de reglas y estado de las plantillas | Sistemas |
+| `/equipo` | titular y respaldo de cada cuenta y ausencias de cualquiera; alta, edición y baja de analistas, restablecer contraseñas y cerrar sesiones, solo Sistemas | Jefatura y Sistemas |
+| `/configuracion` | horario de atención, parámetros de reglas, alertas operativas y estado de las plantillas | Sistemas |
 | `/mi-cuenta` | cambiar la propia contraseña y las propias ausencias | todos |
 
 Las plantillas se ven pero no se activan desde la pantalla: se marcan activas en la base recién
 cuando Meta las aprueba (V8). Los parámetros se validan contra el tipo del valor actual y un número
 no admite cero, porque 0 días de retención purgaría todos los CVs en la próxima vuelta del Worker.
 
-Cuatro cosas que la pantalla hace explícitas porque el analista necesita verlas:
+Cinco cosas que la pantalla hace explícitas porque el analista necesita verlas:
 
 - **Lo que le transfirieron** (Regla 8) va arriba de la lista, en cualquier pestaña, con aceptar y
   rechazar. Se decide con la tarjeta —quién la manda, de qué cuenta, sobre quién y el comentario—
@@ -223,9 +229,15 @@ Cuatro cosas que la pantalla hace explícitas porque el analista necesita verlas
   Meta. Sin eso, el analista intentaría usar una y no entendería el rechazo.
 - **El aviso multi-cuenta** (Regla 6) sale en la lista y en la cabecera del chat, genérico y sin
   dejar ver las conversaciones de la otra cuenta.
+- **Si un mensaje llegó.** Cada saliente muestra su estado como en WhatsApp: ○ todavía no salió,
+  ✓ enviado, ✓✓ entregado, ✓✓ en azul leído, y ⚠ si no llegó, con el motivo en el tooltip. Cuando
+  Meta avisa que un mensaje no llegó, quien lo escribió —o quien atiende, si lo mandó el bot— recibe
+  el aviso en vivo (FUN-13). Un texto propio que el proveedor rechazó en firme ofrece «Reintentar»,
+  que lo vuelve a poner en la caja sin enviarlo: si el motivo fue la ventana cerrada, lo que hace
+  falta es una plantilla. Los fallos ambiguos no lo ofrecen, porque pudieron haber salido.
 
-**El canal en vivo.** Escalamientos, transferencias y avisos de formulario sin completar llegan a
-la bandeja sin que nadie refresque (Sección 9.6.3). El hub vive en la Api (`/hub/bandeja`), con un
+**El canal en vivo.** Escalamientos, transferencias, avisos de formulario sin completar y mensajes
+que no llegaron aparecen en la bandeja sin que nadie refresque (Sección 9.6.3). El hub vive en la Api (`/hub/bandeja`), con un
 grupo por analista —sin eso, un aviso destinado a uno llegaría a todos y la Regla 4 quedaría rota
 también en el canal—. La bandeja se conecta como cliente HTTP, así que sigue sin conocer la base.
 
@@ -243,12 +255,18 @@ por query string — y solo se acepta ahí, en la ruta del hub.
 primera respuesta, tasa de conversión y actividad por analista— más el desglose por cuenta. Sin
 período, cubre los últimos 30 días.
 
-Dos criterios que conviene conocer antes de leer el número:
+Cuatro criterios que conviene conocer antes de leer el número:
 
 - **La primera respuesta cuenta sólo respuestas de una persona.** El menú del bot sale en
   segundos; incluirlo daría un promedio que no dice nada del servicio.
-- **El promedio viene con su mediana.** Un solo mensaje respondido el lunes por la mañana después
-  de llegar el sábado distorsiona el promedio de toda la semana.
+- **Se mide por espera, no por conversación.** Cada vez que el postulante escribe y queda esperando
+  es una *tanda*: un hilo que va y viene tres veces son tres esperas, y medir sólo la primera
+  tapaba las demás. Las que nadie respondió se cuentan aparte: son las que hay que mirar.
+- **En horas de atención**, con el mismo calendario que usa el escalamiento de la Regla 2: el
+  viernes a las 17:50 y la respuesta del lunes a las 09:10 son 20 minutos, no tres días. El tiempo
+  a reloj corrido se sigue mostrando al lado, porque es lo que esperó la persona en la vida real.
+- **El promedio viene con su mediana.** Un solo caso largo distorsiona el promedio de toda la
+  semana.
 
 El panel corre sobre `RRHH.WhatsApp.Reporting`, que tiene su propio contexto de solo lectura y no
 pasa por los servicios de dominio. Usa la cadena `RrhhWhatsAppReporting` si está definida, y si no
@@ -287,7 +305,7 @@ detalle, con sus criterios pendientes de confirmar, está en la decisión V22.
 
 | Qué | Quién |
 |---|---|
-| Alta de cuentas y analistas, horario, parámetros de reglas | Sistemas |
+| Alta de cuentas y analistas, baja y cambio de rol, horario, parámetros de reglas | Sistemas |
 | Titular y respaldo de cada cuenta, ausencias de otros, panel de métricas | Jefatura y Sistemas |
 | Crear, cerrar y configurar vacantes | titular o respaldo de esa cuenta, y Sistemas |
 | La propia ausencia | cada analista |
@@ -297,13 +315,38 @@ Jefatura no ve conversaciones ajenas ni recibe transferencias: mira el panel y d
 cobertura. Una prueba recorre todos los controladores y falla si aparece una escritura sin dueño
 declarado.
 
+**Corregir lo que se cargó mal.** `PATCH /hc/{id}` cambia el título, el enlace del formulario —que
+tiene que ser **https**, porque por ahí viajan el DNI y el CV— y el código del aviso, que es único;
+`PATCH /hc/{id}/reabrir` devuelve al ruedo una vacante cerrada por error (y hay que reactivar su
+formulario en Google a mano). Las dos cosas son de quien trabaja la cuenta. `PATCH /cuentas/{id}`
+corrige el nombre o **desactiva** la cuenta: sale del menú del bot, lo que ya está en curso sigue con
+su analista y queda una alerta operativa para cerrarlo.
+
+**Cuando alguien deja de atender** —se da de baja o pasa a Jefatura o Sistemas— su bandeja no puede
+quedar abandonada. `PATCH /analistas/{id}`, en una sola transacción: sus conversaciones pasan al
+respaldo de cada cuenta —o al titular, si él era el respaldo, o a «Sin clasificar» si no queda
+nadie—, sus transferencias pendientes se rechazan o se retiran, sus cuentas quedan **sin titular o
+sin respaldo con una alerta** para que Jefatura las cubra, y sus sesiones se cierran. La pantalla
+muestra antes cuántas conversaciones se van a mover (`GET /analistas/{id}/cartera`). No se borra la
+fila: las postulaciones y las métricas de la Regla 18 quedan atadas a ella.
+
 | Ruta | Para qué |
 |---|---|
 | `POST /sesion/login` | Devuelve el token y su vencimiento |
 | `GET /sesion/yo` | Quién soy según el token |
 | `PUT /sesion/contrasena` | Cambiar la propia; exige la actual |
 | `PUT /sesion/analistas/{id}/contrasena` | Restablecer la de otro — solo rol Sistemas |
+| `POST /sesion/analistas/{id}/cerrar-sesiones` | Dejar sin efecto sus tokens abiertos — solo rol Sistemas |
 | `POST /sesion/arranque` | La primera contraseña del sistema |
+
+**Un token deja de servir antes de vencer.** Vale hasta 9 horas, así que quitarle el acceso a
+alguien no puede depender de que expire solo. El token lleva la **versión de seguridad** del
+analista y la Api la compara en cada petición —también en el hub— contra la de la base (V34): si el
+analista quedó inactivo o la versión subió —restablecerle la contraseña, cerrarle las sesiones—, el
+token deja de entrar y la bandeja lo trata como sesión cerrada. El estado se cachea 60 segundos para
+no consultar la base en cada request, y lo que le quita el acceso a alguien limpia esa entrada, así
+que el efecto es inmediato. Cambiar la propia contraseña también cierra la sesión: hay que volver a
+entrar con la nueva.
 
 **La primera vez.** Tras el despliegue ningún analista tiene contraseña, así que nadie puede
 entrar. `POST /sesion/arranque` fija la primera y **se cierra sola en cuanto existe** — de ahí en
@@ -415,8 +458,8 @@ creada.
 
 El enlace lleva un token aleatorio, no el `HCId`: con el id secuencial se podrían enumerar
 vacantes de otras cuentas cambiando el número en la URL. Cada `HC` necesita su `UrlJobForms`
-cargada; si está abierta pero sin formulario, el envío se omite y queda un evento
-`VacanteSinFormulario` en la outbox.
+cargada; si está abierta pero sin formulario, el envío se omite y queda la alerta operativa
+`VacanteSinFormulario` para que alguien la cargue.
 
 Endpoints públicos, los únicos alcanzables desde internet sin autenticación:
 
@@ -522,6 +565,30 @@ Mientras el formulario viva en Google Forms, el CV queda en Drive y `cvUrl` es s
 de la Regla 17 limpia entonces la referencia pero **no puede borrar el archivo en el origen**: eso
 queda como paso manual hasta migrar a Razor Pages, y el Worker lo registra en el log cuando ocurre.
 
+### Cuando alguien pide que borren sus datos
+
+`DELETE /postulantes/{dni}` (solo Sistemas) **anonimiza, no borra**: eliminar al postulante se
+llevaría sus postulaciones, y con ellas las métricas de la Regla 18. Todo en una sola transacción:
+
+| Qué | Cómo queda |
+|---|---|
+| Postulante | `ANON-{id}`, sin nombre, teléfono ni correo |
+| Ficha del formulario | sin CV —el archivo se borra— y con los campos vacíos |
+| Conversaciones de esa persona | el teléfono pasa a `ANON-{id}` |
+| Mensajes de esas conversaciones | `[anonimizado]`, sin parámetros de plantilla ni opciones |
+| Archivos de WhatsApp | borrados del disco, en estado `Purgado` y sin nombre |
+| Outbox | el payload de lo ya procesado o fallido queda en `{}` (lo pendiente no se toca: es de hace segundos y el consumidor tiene que poder leerlo) |
+| Auditoría de esa persona y sus hilos | conserva qué pasó y cuándo, sin el detalle |
+
+Queda una entrada de auditoría `AnonimizacionDatos` con el motivo del pedido. Si la persona vuelve a
+escribir desde el mismo número, **nace una conversación nueva con opt-in nuevo**: el hilo viejo ya no
+se puede encontrar por teléfono, que es lo correcto después de un pedido de eliminación.
+
+**Cuándo vence un CV.** El plazo (`datos.retencion_cv_dias`) corre desde la **última actividad de la
+persona**, no desde que mandó el formulario, y no se purga nada de quien sigue `EnProceso`, volvió
+por un `Reingreso` o fue `Contratado` (A5). Es el mismo criterio que usan los archivos que llegan por
+WhatsApp.
+
 ### El Apps Script del formulario
 
 Mientras el JobForms viva en Google Forms, lo que conecta el formulario con el sistema es un script
@@ -574,6 +641,60 @@ token de una invitación real:
 **Los adjuntos quedan en Drive**, no en el recurso compartido: lo que viaja es el enlace. Hay que
 darles acceso a los analistas, y la purga de la Regla 17 puede limpiar la referencia pero no el
 archivo. Se resuelve al migrar el formulario a Razor Pages (D3).
+
+### Archivos que manda el postulante por WhatsApp
+
+Mandar el CV por WhatsApp es habitual, igual que la foto del DNI o una nota de voz. Antes quedaba
+solo el texto `[document]`; ahora el archivo se baja, se escanea y se guarda (V33).
+
+1. **El webhook registra.** Imagen, documento, audio, video y sticker entran en `MensajesAdjuntos`
+   como `Pendiente`, en la misma transacción que su mensaje. El chat muestra la leyenda que escribió
+   la persona o `[documento: cv.pdf]`, y las reglas leen esa leyenda como texto: el código del aviso
+   escrito junto a una foto lleva al formulario igual que escrito solo.
+2. **El Worker baja.** Un bucle propio (`DescargaAdjuntos` en `/health`) pide el archivo al proveedor
+   —Meta lo entrega en dos pasos, con una URL que vale 5 minutos— y lo pasa por el **mismo circuito
+   que el CV**: cuarentena, Windows Defender, tope y extensiones permitidas. No espera turno en el
+   limitador de envío: bajar un archivo no es un mensaje saliente.
+3. **Lo que no pasa, se rechaza.** Una amenaza, un archivo más grande que el tope o un tipo no
+   permitido quedan `Rechazado` y no se muestran. Lo que falló por el proveedor o porque el antivirus
+   no respondió se reintenta con espera creciente (1, 2, 4, 8 minutos) y, agotados los intentos,
+   también queda rechazado: el id de medio caduca e insistir no sirve.
+
+4. **El analista lo baja desde el chat.** El mensaje muestra el archivo con su nombre; tocarlo lo
+   descarga. Lo que todavía se está revisando, lo rechazado y lo ya purgado se ven igual, pero
+   dicen por qué no están.
+5. **Se purga con la retención.** Un adjunto es un dato personal de la misma naturaleza que el CV:
+   a los `datos.retencion_adjuntos_dias` se borra el archivo, la fila queda como rastro sin ruta y
+   la purga se audita. El plazo corre desde la **última actividad de la persona** —la del hilo y la
+   de sus postulaciones—, no desde que llegó el archivo (A5), y no se purga nada de quien sigue en
+   proceso, volvió por un reingreso o fue contratado.
+
+El nombre que puso la persona nunca forma parte de la ruta. La extensión sale del nombre si lo trae
+—solo los documentos— y si no, del tipo: `cv.pdf.exe` se rechaza por `.exe`, que es como lo abriría
+la máquina del analista.
+
+**El archivo no tiene URL propia.** El token del analista vive solo en el circuito de Blazor, así
+que es el circuito el que le pide el archivo a la Api (`GET /conversaciones/{id}/adjuntos/{adjuntoId}`,
+con el mismo control de acceso que el chat) y se lo entrega al navegador. No hay enlace que quede en
+el historial ni que se pueda reenviar por error.
+
+| `Adjuntos:*` | Por defecto | Para qué |
+|---|---|---|
+| `Carpeta` | vacía = `{Cv:Carpeta}/adjuntos` | Dónde se guardan. La Api y el Worker tienen que ver la misma |
+| `TamanoMaximoMb` | 16 | Tope por archivo; es lo que admite WhatsApp en audio y video |
+| `ExtensionesPermitidas` | documentos, imágenes, audio y video | Lo ejecutable nunca |
+
+| `Worker:*` | Por defecto | Para qué |
+|---|---|---|
+| `IntervaloDescargaAdjuntosSegundos` | 30 | Pausa con la cola vacía. Corta: el id de medio caduca |
+| `TamanoLoteDescargaAdjuntos` | 10 | Archivos por vuelta; con el lote lleno sigue sin dormir |
+| `IntentosDescargaAdjunto` | 5 | Intentos antes de darlo por perdido |
+| `EsperaReintentoDescargaSegundos` | 60 | Espera tras el primer fallo; se duplica en cada intento |
+| `TiempoMaximoDescargaSegundos` | 300 | Una descarga colgada se corta y se reintenta |
+
+**En desarrollo** el proveedor simulado entrega siempre el mismo PDF mínimo, así que el circuito se
+recorre entero sin Meta. Si la Api y el Worker corren desde carpetas distintas, `Cv:Carpeta` relativa
+apunta a dos lugares: conviene fijar una ruta absoluta con `Cv__Carpeta` en los dos procesos.
 
 ### SQL Express y AUTO_CLOSE
 
@@ -635,13 +756,19 @@ lo que tenía que pasar.
 
 Cada bucle deja su señal de vida en `LatidosServicio` al cerrar un ciclo, con **su propia
 tolerancia**: el consumidor de la outbox late cada 5 segundos y la purga cada 24 horas, así que un
-umbral único daría falsas alarmas en uno o silencio en el otro. Quien late declara cuánto puede
+umbral único daría falsas alarmas en uno o silencio en el otro. El latido del mantenimiento diario
+sigue llamándose `PurgaCv` aunque el bucle sea `ServicioMantenimientoDatos`: el nombre está en la
+tabla y en lo que mira el monitoreo. Quien late declara cuánto puede
 tardar el próximo; la Api solo compara.
 
 | Ruta | Qué mira | Para quién |
 |---|---|---|
 | `GET /health/vivo` | solo que el proceso responde | IIS, para decidir si reciclar el sitio |
-| `GET /health` | SQL Server, los bucles del Worker y qué instancia tiene el candado | el monitoreo |
+| `GET /health` | SQL Server, los bucles del Worker, qué instancia tiene el candado y las alertas operativas | el monitoreo |
+
+Las alertas no ponen `/health` en rojo sino en **Degraded** (responde 200): una plantilla sin aprobar
+o una vacante sin formulario no tumban nada, pero dejan postulantes sin respuesta y el monitoreo
+tiene que verlas. Las demás alertas (una cuenta sin respaldo, por ejemplo) no degradan.
 
 `/health` devuelve **503 con el detalle de qué bucle se detuvo y hace cuánto**, más lo que hizo en
 su último ciclo:
@@ -666,6 +793,146 @@ reciclara la Api en bucle sin arreglar nada.
 monitor externo que lo consulte cada pocos minutos y avise. Cualquier cosa sirve —una tarea
 programada con `curl`, o el monitoreo que ya use Sistemas—; lo que no sirve es suponer que un
 endpoint en rojo alcanza por sí solo.
+
+### Cola de envíos
+
+Un mensaje enviado no se puede deshacer. Mientras las reglas mandaban directo al proveedor, cualquier
+fallo posterior —la auditoría, la marca de procesado, la base— devolvía el evento a la cola y el
+siguiente intento volvía a mandar el menú o el enlace (C5). Por eso **decidir y enviar están
+separados** (V29):
+
+1. **Las reglas encolan.** Cada envío decidido es una fila de `Mensajes` en `EnCola` con una
+   `ClaveIdempotencia` única (`evt:{EventoId}:{acción}` para la outbox, `barrido:{conversación}:{minuto}:{acción}`
+   para el barrido). Se guarda en la misma transacción que el resto de lo que hizo el evento: si algo
+   falla, no queda nada, y si el evento se reprocesa, el índice único rechaza el mensaje repetido.
+2. **El despachador del Worker envía** (`ServicioDespachoEnvios`, cada 2 s, de a 20). Pasa la fila a
+   `Enviando`, **revalida la Regla 15** —la ventana pudo cerrarse o la plantilla desactivarse
+   mientras esperaba—, respeta el limitador y marca el resultado.
+3. **Lo atascado queda ambiguo.** Un `Enviando` que supera `TimeoutEnviandoSegundos` (120) es un envío
+   cuyo resultado se perdió: pasa a `Fallido`/`Ambiguo` y no se reintenta solo, porque pudo haber salido.
+
+**La respuesta del analista sigue siendo inmediata** (V14): el analista ve en el acto si salió. Pero
+también registra la fila antes de llamar al proveedor, con una clave que genera la bandeja al
+redactar. Un doble clic, o la bandeja reintentando porque perdió la respuesta, devuelve el mensaje que
+ya existe. Esa fila nace `Enviando`, así que el despachador del Worker nunca la toma.
+
+| `Worker:*` | Por defecto | Para qué |
+|---|---|---|
+| `IntervaloDespachoSegundos` | 2 | Pausa entre vueltas del despachador con la cola vacía |
+| `TamanoLoteDespacho` | 20 | Mensajes por vuelta; con el lote lleno sigue sin dormir |
+| `TimeoutEnviandoSegundos` | 120 | Cuándo un `Enviando` se da por perdido. Tiene que superar el timeout HTTP del adaptador |
+
+
+### El enlace del aviso
+
+Cada vacante tiene un **código de 6 caracteres** (`K7M2QX`) que se genera al crearla. En la pantalla
+de vacantes, «Copiar enlace» arma:
+
+```
+https://wa.me/51999888777?text=Hola%2C%20postulo%20a%20K7M2QX
+```
+
+Ese enlace va en la publicación del aviso. Quien lo toca abre WhatsApp con el mensaje ya escrito, y
+el bot le manda el formulario de **esa** vacante sin pasarlo por el menú de empresas. El número sale
+de `WhatsApp:NumeroPublico` (en la Api, o por la variable `WhatsApp__NumeroPublico`): no es secreto
+—va impreso en los avisos— y no es el `PhoneNumberId` de Meta, que sí es interno. Sin configurarlo,
+la pantalla muestra el código igual y avisa que falta el número.
+
+### Lo que el bot resuelve solo
+
+1. **Código de aviso.** Cada vacante tiene uno de 6 caracteres (`K7M2QX`). Quien escribe «Hola,
+   postulo a K7M2QX» —el texto que deja el enlace `wa.me` del aviso— recibe el formulario directo,
+   sin pasar por el menú de ~20 empresas. Escribir el nombre de la empresa también alcanza.
+2. **Menú de empresas**, paginado, si no reconoció nada. El menú de vacantes se muestra **una vez**:
+   quien ya eligió, ya completó el formulario o ya tiene un proceso vivo no lo vuelve a ver.
+3. **Reintento y derivación.** Un texto que no reconoce da un reintento del menú; agotado, la
+   conversación pasa a «Sin clasificar» con la fecha desde la que espera.
+4. **Continuidad.** Quien vuelve a escribir a los días sigue con su analista si tiene un proceso
+   vivo; si no lo tiene, el bot le vuelve a preguntar la empresa.
+
+Los mensajes del bot salen en **texto** mientras la ventana de 24h está abierta y como plantilla
+aprobada fuera de ella (P1). Si no hay ninguna de las dos, el mensaje no sale y queda una alerta
+operativa: lo que no salió tampoco se sella, así que el barrido lo reintenta cuando Meta apruebe.
+
+### «Sin clasificar»: tomar una conversación
+
+Un hilo que el bot no pudo clasificar lo ven todos los analistas, pero **para actuar hay que
+tomarlo**: `POST /conversaciones/{id}/tomar` con la cuenta elegida, o el botón «Tomar» del chat.
+Responder, transferir o marcar sin tomar se rechaza con el mismo motivo. Si dos analistas lo toman
+a la vez, uno recibe 409 y ve que ya no está disponible.
+
+### El menú del bot
+
+WhatsApp muestra hasta 10 filas por lista. Con más cuentas que eso el menú se **pagina**: 9 empresas
+por página y una décima fila para «Ver más empresas», que en la última página dice «Volver al
+inicio». Antes se cortaba en las primeras 10 y las demás no existían para el postulante.
+
+Navegar no cuenta como intento fallido: pedir otra página no acerca la conversación a «Sin
+clasificar» (Regla 19).
+
+### Seguimiento por tiempo
+
+El barrido del Worker revisa cada pocos minutos que ningún hilo ni proceso quede sin dueño ni plazo
+(P3). Los plazos viven en `ConfiguracionReglas`, y los que se miden en horas corren en **horas
+hábiles**: un escalamiento del viernes a la tarde no avisa el sábado. El de la Regla 2 lo hace
+mientras `escalamiento.solo_horario_laboral` siga en `true`.
+
+| Qué | Cuándo | Qué pasa |
+|---|---|---|
+| Escalamiento (Regla 2) | `escalamiento.horas` sin respuesta del titular | Pasa al respaldo. Se revalida al ejecutar: si el titular respondió o el hilo cambió de manos en el medio, no escala |
+| Segundo nivel (Regla 2) | `escalamiento.horas_segundo_nivel` sin respuesta del respaldo | Aviso a Jefatura, al respaldo y al titular; la bandeja marca el hilo como **vencida** |
+| Silencio en el menú (Regla 19) | `menu.horas_derivacion` tras un texto no reconocido | Pasa a «Sin clasificar» con la fecha desde la que espera |
+| «Sin clasificar» sin tomar (Regla 19) | `clasificacion.horas_aviso` | Aviso a Jefatura, una sola vez |
+| Transferencia no urgente sin respuesta (Regla 8) | `transferencia.horas_vencimiento` | Vence y el hilo sigue con quien la envió; los dos reciben aviso. Quien la envió puede **retirarla** antes desde «Transferencias que enviaste» |
+| Cierre de cortesía (Regla 12) | Al descartar, con «Enviar mensaje de cierre al postulante» marcada | Sale una sola vez y dentro del horario de atención: un descarte fuera de hora sale al abrir la jornada. `cierre.automatico = false` lo apaga para todos |
+| Archivado de la postulación (Regla 16) | `conversacion.archivado_dias` sin movimiento | El analista recibe un aviso `conversacion.aviso_archivado_dias` antes, con la fecha. Contratados y reingresos no se archivan; los descartados se archivan sin aviso |
+| Archivado del hilo (Regla 16) | `conversacion.archivado_dias` sin actividad y sin procesos vivos ni contratados | El hilo se archiva |
+| Fin de una ausencia (Regla 14) | Al terminar | El titular recibe cuántas conversaciones nuevas de sus cuentas quedaron con el respaldo |
+
+**Vuelve a escribir un hilo archivado.** Se **reactiva**. Con un proceso vivo, vuelve con su
+analista y sin menú; con varios, el bot le pregunta por cuál escribe; sin ninguno, recibe el menú
+con un saludo de regreso.
+
+**Reingreso.** Un ex trabajador que vuelve, o un descarte que el analista reconsidera, se marca con
+el botón «Reingreso» del tablero o del chat. Cuenta como proceso vivo: no se archiva, y sus mensajes
+van directo a su analista.
+
+**Una persona, varias empresas.** Todo llega por el mismo hilo de WhatsApp. Si escribe sin decir
+por cuál, el bot le ofrece sus procesos por nombre y la salida «Otra empresa». Lo que el analista le
+responde en texto lleva el prefijo `[Cuenta · Vacante]`, para que sepa de qué empresa se le habla.
+
+### Qué guarda la outbox
+
+Los eventos llevan **identificadores, no datos personales**: `MensajeEntranteRecibido` es
+`ConversacionId`, `MensajeId`, el botón que se pulsó y la fecha de la actividad anterior del hilo.
+El teléfono, el texto y el nombre de perfil se leen de las tablas cuando el evento se procesa. La
+razón es la Regla 17: los datos personales se purgan en `Mensajes` y `Postulantes`, y una copia en
+la outbox los dejaría vivos fuera de esa purga (AL6). Los avisos a analistas siguen la misma regla:
+dicen qué conversación mirar, no qué escribió la persona.
+
+La fecha de actividad anterior viaja en el evento porque no se puede reconstruir después: el
+mensaje que dispara la evaluación ya movió `FechaUltimaActividad`, y es lo que la Regla 9 mira para
+saber cuántos días estuvo callado el postulante.
+
+**Y no crece para siempre.** El mantenimiento diario borra los eventos ya **procesados** más viejos
+que `outbox.retencion_dias_procesados` (30 días), de a lotes: una sola sentencia sobre meses de
+histórico bloquearía la tabla mientras el webhook sigue publicando. Lo **pendiente** y lo **fallido**
+no se tocan por viejo que sea: uno espera consumidor y el otro espera a una persona.
+
+### Alertas operativas
+
+Lo que una persona tiene que arreglar —una plantilla que Meta no aprobó, una vacante abierta sin
+formulario, un menú sin opciones, una cuenta sin titular o sin respaldo— queda en
+`AlertasOperativas`, **agrupado**: una fila abierta por tipo y clave (`plantilla:recordatorio_24h`,
+`hc:12`) con un contador de ocurrencias. Antes eran eventos de la outbox que nadie consumía y crecían
+para siempre (M1). Una alerta resuelta no absorbe la siguiente: si el problema vuelve, es una alerta
+nueva. No llevan datos personales.
+
+**Dónde se ven.** En `/configuracion`, sección «Alertas operativas», con el contador de veces que
+volvió a pasar y el botón «Resolver»; el menú lateral muestra cuántas hay abiertas, para que alguien
+entre a mirarlas sin que se le ocurra. Verlas es de Jefatura y Sistemas; **resolverlas, de Sistemas**,
+que es quien las arregla —activar la plantilla aprobada, cargar el formulario— y quien responde por
+darlas por hechas. Las mismas alertas ponen `/health` en **Degraded** para el monitoreo.
 
 ### Velocidad de envío
 
@@ -738,13 +1005,16 @@ Por eso el Worker toma un **candado en SQL Server** (`sp_getapplock`) antes de a
 otro toma el candado, pueden solaparse. Para correr varias instancias a propósito sigue haciendo
 falta la reserva por fila. La cadencia se ajusta en la sección `Worker` de `appsettings.json`.
 
-Las pruebas contra SQL Server real —el candado, y el cambio de titular contra el índice único— se
-omiten si no se indica cuál. No dejan filas: el candado usa nombres propios, y la otra corre dentro
-de una transacción que se deshace.
+Las pruebas contra SQL Server real se omiten si no se indica cuál. Son las que EF InMemory no puede
+cubrir: el candado, los índices únicos (titular, clave de idempotencia, alerta abierta), las
+transacciones —webhook, formulario, outbox (E16, E17)— y las migraciones. Las que necesitan datos
+crean su propia base `RRHH_Pruebas_{guid}` con todas las migraciones y la borran al terminar
+(`SqlServerFixture`): **nunca escriben en la base que indica la variable**. Con la variable definida,
+`dotnet test` corre las dos familias juntas.
 
 ```powershell
 $env:RRHH_PRUEBAS_SQL = "Server=.\SQLEXPRESS;Database=RRHH_WhatsApp;Trusted_Connection=True;TrustServerCertificate=True"
-dotnet test --filter "FullyQualifiedName~SqlServer"
+dotnet test
 ```
 
 Para levantarlo en desarrollo, con la Api corriendo aparte:
@@ -792,7 +1062,8 @@ que leen los tres procesos:
 | `Arranque__EmailSistemas` | Correo del primer analista de Sistemas (V25) |
 | `MetaCloud__*` o `Dialog360__*` | Credenciales del proveedor de WhatsApp |
 | `JobForms__SecretoWebhook` | Lo que autentica al Apps Script de Google |
-| `Cv__Carpeta` | Ruta UNC del recurso compartido de CVs |
+| `WhatsApp__NumeroPublico` | El número al que escriben los postulantes, para los enlaces de los avisos (FUN-02). No es secreto, pero sí depende del ambiente |
+| `Cv__Carpeta` | Ruta UNC del recurso compartido de CVs. Los adjuntos de WhatsApp van en su subcarpeta `adjuntos`, salvo que se defina `Adjuntos__Carpeta`: la Api y el Worker tienen que ver la misma |
 | `ASPNETCORE_ENVIRONMENT` | `Production` |
 
 Se leen al arrancar: después de cambiarlas hay que reciclar el pool y reiniciar el servicio.
@@ -825,14 +1096,17 @@ así que una caída de SQL Server no lo hace reciclar el sitio en bucle.
 - [ ] Cuentas, analistas, respaldos por cuenta y horario de atención cargados (`GET /cuentas` los muestra)
 - [ ] `AUTO_CLOSE` desactivado en la base de producción (lo hace la migración `DesactivarAutoClose`)
 - [ ] Aviso de privacidad revisado por Legal y su versión registrada en `ConfiguracionReglas`
+- [ ] `WhatsApp__NumeroPublico` con la **línea definitiva** en formato internacional (`+51999888777`). En desarrollo hay un número de prueba de Meta, que solo escribe a su lista blanca y caduca: con el número equivocado, los enlaces impresos en los avisos no llevan a ninguna parte
 - [ ] `HC.UrlJobForms` cargada en cada vacante abierta, y `JobForms__SecretoWebhook` desplegado en el Apps Script
-- [ ] Carpeta de CVs (`Cv:Carpeta`) creada en el recurso compartido, con permisos para la cuenta del Worker
+- [ ] Carpeta de CVs (`Cv:Carpeta`) creada en el recurso compartido, con permisos para la cuenta del Worker, y la **misma ruta** en la Api y en el Worker: el Worker guarda los adjuntos de WhatsApp y la Api los sirve
 - [ ] Windows Defender activo en el servidor (`Get-MpComputerStatus`), o `Cv:Antivirus:ExigirEscaneo` bajado a conciencia
 - [ ] Plazo de retención de CVs (`datos.retencion_cv_dias`) confirmado con Legal
 - [ ] `Jwt__Clave` desplegada como variable de entorno (mínimo 32 caracteres) — sin ella la Api no arranca
 - [ ] `Arranque__EmailSistemas` definido y `POST /sesion/arranque` ejecutado apenas publicado: en una base nueva crea el analista de Sistemas y le fija la contraseña
 - [ ] Quien mira el panel de métricas dado de alta con `"rol":"Jefatura"`, y su contraseña restablecida por Sistemas
-- [ ] Monitor externo consultando `GET /health` y avisando cuando devuelva 503 (Sección 9.6.2)
+- [ ] Monitor externo consultando `GET /health` y avisando cuando devuelva 503 (Sección 9.6.2), y mirando también el **Degraded**: son las alertas operativas, que no tumban nada pero dejan postulantes sin respuesta
+- [ ] Alguien de Sistemas con el hábito de revisar `/configuracion` → «Alertas operativas»: el contador del menú es lo que lo recuerda
+- [ ] Cada plantilla nueva que se registre en Meta, sembrada en `Plantillas` y marcada `Activa = true` recién cuando Meta la apruebe (V8)
 - [ ] `scripts/respaldo.ps1` programado en el Programador de tareas, con permiso de escritura para la cuenta del servicio de SQL Server
 - [ ] `scripts/verificar-respaldo.ps1` programado como chequeo periódico de consistencia
 - [ ] Una restauración de prueba hecha al menos una vez, con `restaurar.ps1`, antes de confiar en los respaldos

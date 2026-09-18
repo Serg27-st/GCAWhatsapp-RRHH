@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using RRHH.WhatsApp.Infrastructure.Proveedores;
 using RRHH.WhatsApp.Domain.Entidades;
 using RRHH.WhatsApp.Domain.Enums;
 using RRHH.WhatsApp.Domain.Interfaces;
@@ -32,14 +33,10 @@ public class AccionesBandejaTests : IDisposable
         return resultado.PostulacionId;
     }
 
-    private async Task ActivarCierreAsync()
-    {
-        var plantilla = await _entorno.Db.Plantillas
-            .FirstAsync(p => p.Clave == ClavesPlantilla.CierreCortesia);
-
-        plantilla.Activa = true;
-        await _entorno.Db.SaveChangesAsync();
-    }
+    /// <summary>Lo que el postulante lee cuando lo descartan (COR-03: texto dentro de la ventana).</summary>
+    private static bool EsCierreDeCortesia(EnvioSimulado envio) =>
+        (envio.Tipo == "texto" && envio.Detalle.Contains("Agradecemos tu interes"))
+        || (envio.Tipo == "plantilla" && envio.Detalle == ClavesPlantilla.CierreCortesia);
 
     private async Task<int> EtapaAsync(string nombre) =>
         (await _entorno.Db.EtapasKanban.AsNoTracking().FirstAsync(e => e.Nombre == nombre)).EtapaId;
@@ -96,7 +93,6 @@ public class AccionesBandejaTests : IDisposable
     [Fact]
     public async Task Regla_12_al_descartar_sale_el_cierre_de_cortesia()
     {
-        await ActivarCierreAsync();
         await ConPostulacionAsync();
 
         var postulante = await _entorno.Db.Postulantes.AsNoTracking().FirstAsync();
@@ -108,8 +104,7 @@ public class AccionesBandejaTests : IDisposable
         // El mensaje no sale del endpoint: la regla lo decide y el Worker lo ejecuta.
         await _entorno.ConsumirOutboxAsync();
 
-        Assert.Contains(_entorno.Proveedor.Enviados,
-            e => e.Tipo == "plantilla" && e.Detalle == ClavesPlantilla.CierreCortesia);
+        Assert.Contains(_entorno.Proveedor.Enviados, EsCierreDeCortesia);
     }
 
     [Fact]
@@ -130,7 +125,6 @@ public class AccionesBandejaTests : IDisposable
     [Fact]
     public async Task Regla_13_arrastrar_a_Descartado_tambien_dispara_el_cierre()
     {
-        await ActivarCierreAsync();
         var postulacionId = await ConPostulacionAsync();
 
         await _entorno.Bandeja.MoverEtapaAsync(
@@ -138,14 +132,12 @@ public class AccionesBandejaTests : IDisposable
 
         await _entorno.ConsumirOutboxAsync();
 
-        Assert.Contains(_entorno.Proveedor.Enviados,
-            e => e.Tipo == "plantilla" && e.Detalle == ClavesPlantilla.CierreCortesia);
+        Assert.Contains(_entorno.Proveedor.Enviados, EsCierreDeCortesia);
     }
 
     [Fact]
     public async Task Contratar_no_dispara_ningun_cierre_de_cortesia()
     {
-        await ActivarCierreAsync();
         var postulacionId = await ConPostulacionAsync();
 
         await _entorno.Bandeja.MoverEtapaAsync(
@@ -153,8 +145,7 @@ public class AccionesBandejaTests : IDisposable
 
         await _entorno.ConsumirOutboxAsync();
 
-        Assert.DoesNotContain(_entorno.Proveedor.Enviados,
-            e => e.Tipo == "plantilla" && e.Detalle == ClavesPlantilla.CierreCortesia);
+        Assert.DoesNotContain(_entorno.Proveedor.Enviados, EsCierreDeCortesia);
     }
 
     [Fact]

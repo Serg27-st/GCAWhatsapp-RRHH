@@ -20,6 +20,7 @@ public class RrhhDbContext(DbContextOptions<RrhhDbContext> options) : DbContext(
 
     public DbSet<Conversacion> Conversaciones => Set<Conversacion>();
     public DbSet<Mensaje> Mensajes => Set<Mensaje>();
+    public DbSet<MensajeAdjunto> MensajesAdjuntos => Set<MensajeAdjunto>();
     public DbSet<Transferencia> Transferencias => Set<Transferencia>();
     public DbSet<Plantilla> Plantillas => Set<Plantilla>();
 
@@ -29,6 +30,7 @@ public class RrhhDbContext(DbContextOptions<RrhhDbContext> options) : DbContext(
     public DbSet<EventoSistema> EventosSistema => Set<EventoSistema>();
     public DbSet<ConfiguracionRegla> ConfiguracionReglas => Set<ConfiguracionRegla>();
     public DbSet<Auditoria> Auditorias => Set<Auditoria>();
+    public DbSet<AlertaOperativa> AlertasOperativas => Set<AlertaOperativa>();
     public DbSet<LatidoServicio> LatidosServicio => Set<LatidoServicio>();
 
     protected override void OnModelCreating(ModelBuilder modelo)

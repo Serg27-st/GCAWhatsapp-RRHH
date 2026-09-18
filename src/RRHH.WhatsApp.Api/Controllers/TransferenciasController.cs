@@ -35,9 +35,51 @@ public sealed class TransferenciasController(
             t.Conversacion?.Postulante?.NombreCompleto,
             t.Conversacion?.TelefonoE164,
             t.Comentario,
-            t.Fecha)));
+            t.Fecha,
+            t.FechaVencimiento)));
     }
 
+
+    /// <summary>
+    /// FUN-07: quien la envió la retira mientras nadie la haya respondido. El destino se entera por
+    /// el mismo canal que cuando se la ofrecieron.
+    /// </summary>
+    [HttpPost("{id:int}/retirar")]
+    public async Task<IActionResult> Retirar(int id, CancellationToken ct)
+    {
+        try
+        {
+            await conversaciones.RetirarTransferenciaAsync(id, User.AnalistaId(), ct);
+
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { motivo = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Retirar una ajena o una ya respondida: ninguno se arregla reintentando.
+            log.LogWarning(ex, "Retiro rechazado para la transferencia {TransferenciaId}.", id);
+
+            return UnprocessableEntity(new { motivo = ex.Message });
+        }
+    }
+
+    /// <summary>Lo que quien está autenticado ofreció y todavía espera respuesta (FUN-07).</summary>
+    [HttpGet("enviadas")]
+    public async Task<IActionResult> Enviadas(CancellationToken ct)
+    {
+        var enviadas = await conversaciones.ListarTransferenciasEnviadasPendientesAsync(User.AnalistaId(), ct);
+
+        return Ok(enviadas.Select(t => new TransferenciaEnviada(
+            t.TransferenciaId,
+            t.ConversacionId,
+            t.AnalistaDestino?.Nombre ?? $"Analista {t.AnalistaDestinoId}",
+            t.Conversacion?.Postulante?.NombreCompleto,
+            t.Fecha,
+            t.FechaVencimiento)));
+    }
     [HttpPost("{id:int}/responder")]
     public async Task<IActionResult> Responder(
         int id, [FromBody] PeticionResponderTransferencia peticion, CancellationToken ct)

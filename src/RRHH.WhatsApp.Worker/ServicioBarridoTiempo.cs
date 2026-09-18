@@ -18,6 +18,7 @@ namespace RRHH.WhatsApp.Worker;
 public sealed class ServicioBarridoTiempo(
     IServiceScopeFactory ambitos,
     IOptions<OpcionesWorker> opciones,
+    TimeProvider reloj,
     ILogger<ServicioBarridoTiempo> log) : BackgroundService
 {
     private readonly OpcionesWorker _opciones = opciones.Value;
@@ -64,14 +65,9 @@ public sealed class ServicioBarridoTiempo(
 
     private async Task<int> BarrerAsync(CancellationToken ct)
     {
-        var candidatas = await ReunirCandidatasAsync(ct);
-
-        if (candidatas.Count == 0)
-            return 0;
-
         var total = 0;
 
-        foreach (var conversacionId in candidatas)
+        foreach (var conversacionId in await ReunirCandidatasAsync(ct))
         {
             if (ct.IsCancellationRequested)
                 break;
@@ -92,7 +88,68 @@ public sealed class ServicioBarridoTiempo(
             }
         }
 
+        // FUN-12 (A10): los titulares que volvieron de una ausencia reciben su resumen. Va en su propio
+        // ambito: no es una regla sobre un hilo, y si falla no tiene por que frenar el resto.
+        try
+        {
+            using var ambitoAviso = ambitos.CreateScope();
+
+            await ambitoAviso.ServiceProvider.GetRequiredService<AvisoRetornoAusencia>().ProcesarAsync(ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            log.LogError(ex, "Fallo el aviso de retorno de ausencias.");
+        }
+
+        // FUN-10, FUN-11: lo que vence por postulacion va aparte. Una persona puede tener un proceso
+        // archivandose en una cuenta y otro vivo en otra, y cada uno se evalua con su propio contexto.
+        foreach (var postulacionId in await ReunirPostulacionesAsync(ct))
+        {
+            if (ct.IsCancellationRequested)
+                break;
+
+            using var ambito = ambitos.CreateScope();
+
+            try
+            {
+                total += await ambito.ServiceProvider
+                    .GetRequiredService<BarridoTiempo>()
+                    .ProcesarPostulacionAsync(postulacionId, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                log.LogError(ex, "Fallo el barrido de la postulacion {PostulacionId}.", postulacionId);
+            }
+        }
+
         return total;
+    }
+
+    /// <summary>
+    /// FUN-10 y FUN-11: postulaciones con un cierre de cortesia pedido, en la ventana de aviso previo
+    /// al archivado, o ya vencidas. Sin repetir: la misma puede estar en mas de una lista.
+    /// </summary>
+    private async Task<IReadOnlyCollection<int>> ReunirPostulacionesAsync(CancellationToken ct)
+    {
+        using var ambito = ambitos.CreateScope();
+        var sp = ambito.ServiceProvider;
+
+        var postulaciones = sp.GetRequiredService<IPostulacionService>();
+        var configuracion = await sp.GetRequiredService<IConfiguracionReglasService>().ObtenerTodasAsync(ct);
+
+        var lote = _opciones.TamanoLoteBarrido;
+        var dias = Entero(configuracion, ClavesConfiguracion.ArchivadoDias, 90);
+        var diasAviso = Entero(configuracion, ClavesConfiguracion.ArchivadoAvisoDias, 7);
+
+        var candidatas = new HashSet<int>(await postulaciones.ListarCierresPendientesAsync(lote, ct));
+
+        foreach (var id in await postulaciones.ListarPorAvisarArchivadoAsync(dias, diasAviso, lote, ct))
+            candidatas.Add(id);
+
+        foreach (var id in await postulaciones.ListarPorArchivarAsync(dias, lote, ct))
+            candidatas.Add(id);
+
+        return candidatas;
     }
 
     /// <summary>
@@ -115,6 +172,24 @@ public sealed class ServicioBarridoTiempo(
         var candidatas = new HashSet<int>();
 
         foreach (var id in await conversaciones.ListarPendientesEscalamientoAsync(lote, ct))
+            candidatas.Add(id);
+
+        // FUN-05: las ya escaladas que siguen esperando son candidatas al aviso a Jefatura.
+        foreach (var id in await conversaciones.ListarPendientesSegundoNivelAsync(lote, ct))
+            candidatas.Add(id);
+
+        // FUN-06: las que quedaron en silencio en el menu del bot, y las que esperan en la bandeja
+        // general sin que nadie las tome.
+        foreach (var id in await conversaciones.ListarPendientesDerivacionMenuAsync(lote, ct))
+            candidatas.Add(id);
+
+        foreach (var id in await conversaciones.ListarPendientesAvisoClasificacionAsync(lote, ct))
+            candidatas.Add(id);
+
+        // FUN-07 (A1): las transferencias no urgentes cuyo plazo ya vencio.
+        var ahora = reloj.GetUtcNow().UtcDateTime;
+
+        foreach (var id in await conversaciones.ListarConversacionesConTransferenciaVencidaAsync(ahora, lote, ct))
             candidatas.Add(id);
 
         var diasArchivado = Entero(configuracion, ClavesConfiguracion.ArchivadoDias, 90);

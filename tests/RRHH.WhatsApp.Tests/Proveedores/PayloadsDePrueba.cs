@@ -110,7 +110,105 @@ internal static class PayloadsDePrueba
               "id": "wamid.DOC1",
               "timestamp": "1755600400",
               "type": "document",
-              "document": { "filename": "cv.pdf", "mime_type": "application/pdf" }
+              "document": {
+                "filename": "cv.pdf",
+                "mime_type": "application/pdf",
+                "sha256": "0c7ce1b5a2c4b8d7e3f1a9b2c6d4e8f0a1b3c5d7e9f2a4b6c8d0e2f4a6b8c0d2",
+                "id": "1037543291543636"
+              }
+            }]
+          }
+        }]
+      }]
+    }
+    """;
+
+    /// <summary>Una foto del DNI con texto: la leyenda es lo que la persona escribió.</summary>
+    public const string ImagenConLeyenda = """
+    {
+      "object": "whatsapp_business_account",
+      "entry": [{
+        "changes": [{
+          "field": "messages",
+          "value": {
+            "messages": [{
+              "from": "51987654321",
+              "id": "wamid.IMG1",
+              "timestamp": "1755600410",
+              "type": "image",
+              "image": {
+                "caption": "Mi DNI por ambos lados",
+                "mime_type": "image/jpeg",
+                "sha256": "b1d2c3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2",
+                "id": "2154839923311120"
+              }
+            }]
+          }
+        }]
+      }]
+    }
+    """;
+
+    /// <summary>Una nota de voz: sin nombre ni leyenda, con el códec en el mime.</summary>
+    public const string NotaDeVoz = """
+    {
+      "object": "whatsapp_business_account",
+      "entry": [{
+        "changes": [{
+          "field": "messages",
+          "value": {
+            "messages": [{
+              "from": "51987654321",
+              "id": "wamid.AUD1",
+              "timestamp": "1755600420",
+              "type": "audio",
+              "audio": {
+                "mime_type": "audio/ogg; codecs=opus",
+                "sha256": "c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3",
+                "id": "8854120937765432",
+                "voice": true
+              }
+            }]
+          }
+        }]
+      }]
+    }
+    """;
+
+    public const string Sticker = """
+    {
+      "object": "whatsapp_business_account",
+      "entry": [{
+        "changes": [{
+          "field": "messages",
+          "value": {
+            "messages": [{
+              "from": "51987654321",
+              "id": "wamid.STK1",
+              "timestamp": "1755600430",
+              "type": "sticker",
+              "sticker": { "mime_type": "image/webp", "id": "5512093847712345", "animated": false }
+            }]
+          }
+        }]
+      }]
+    }
+    """;
+
+    /// <summary>Una ubicación: no es un archivo, no hay nada que descargar.</summary>
+    public const string Ubicacion = """
+    {
+      "object": "whatsapp_business_account",
+      "entry": [{
+        "changes": [{
+          "field": "messages",
+          "value": {
+            "messages": [{
+              "from": "51987654321",
+              "id": "wamid.LOC1",
+              "timestamp": "1755600440",
+              "type": "location",
+              "location": { "latitude": -12.0464, "longitude": -77.0428 }
             }]
           }
         }]

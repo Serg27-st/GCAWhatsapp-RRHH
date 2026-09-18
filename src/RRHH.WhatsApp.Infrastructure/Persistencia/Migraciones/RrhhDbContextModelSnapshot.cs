@@ -22,6 +22,54 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.AlertaOperativa", b =>
+                {
+                    b.Property<int>("AlertaId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("AlertaId"));
+
+                    b.Property<string>("Clave")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<string>("Detalle")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("FechaPrimera")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FechaResuelta")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("FechaUltima")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Ocurrencias")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ResueltaPorAnalistaId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Tipo")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.HasKey("AlertaId");
+
+                    b.HasIndex("ResueltaPorAnalistaId");
+
+                    b.HasIndex(new[] { "Tipo", "Clave" }, "IX_AlertasOperativas_AbiertaUnica")
+                        .IsUnique()
+                        .HasFilter("[FechaResuelta] IS NULL");
+
+                    b.ToTable("AlertasOperativas", (string)null);
+                });
+
             modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.Analista", b =>
                 {
                     b.Property<int>("AnalistaId")
@@ -52,6 +100,11 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
 
                     b.Property<int>("Rol")
                         .HasColumnType("int");
+
+                    b.Property<int>("VersionSeguridad")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.HasKey("AnalistaId");
 
@@ -144,6 +197,9 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
 
                     b.Property<int>("AnalistaId")
                         .HasColumnType("int");
+
+                    b.Property<DateTime?>("FechaAvisoRetorno")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("FechaFin")
                         .HasColumnType("datetime2");
@@ -244,7 +300,7 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                         new
                         {
                             Clave = "envio.maximo_por_segundo",
-                            Descripcion = "Seccion 9.6.4: tope de velocidad de envio saliente hacia Meta, para no repetir el patron que causo el bloqueo.",
+                            Descripcion = "Seccion 9.6.4: tope de velocidad de envio saliente hacia Meta, por proceso emisor, para no repetir el patron que causo el bloqueo.",
                             FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Valor = "10"
                         },
@@ -268,6 +324,69 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                             Descripcion = "Base del retroceso exponencial entre reintentos de envio: 1m, 2m, 4m.",
                             FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Valor = "60"
+                        },
+                        new
+                        {
+                            Clave = "escalamiento.horas_segundo_nivel",
+                            Descripcion = "Regla 2 (A9): horas habiles desde el escalamiento sin respuesta del respaldo antes de avisar a Jefatura.",
+                            FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Valor = "2"
+                        },
+                        new
+                        {
+                            Clave = "clasificacion.horas_aviso",
+                            Descripcion = "Regla 19 (P3): horas habiles en Sin clasificar antes de avisar a Jefatura.",
+                            FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Valor = "2"
+                        },
+                        new
+                        {
+                            Clave = "menu.reintentos_permitidos",
+                            Descripcion = "Regla 19: reintentos del menu sin opcion valida antes de derivar a Sin clasificar.",
+                            FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Valor = "1"
+                        },
+                        new
+                        {
+                            Clave = "menu.horas_derivacion",
+                            Descripcion = "Regla 19 (A12): horas habiles de silencio tras un texto no reconocido antes de derivar a Sin clasificar.",
+                            FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Valor = "2"
+                        },
+                        new
+                        {
+                            Clave = "transferencia.horas_vencimiento",
+                            Descripcion = "Regla 8 (A1): horas habiles hasta que vence una transferencia no urgente sin respuesta.",
+                            FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Valor = "2"
+                        },
+                        new
+                        {
+                            Clave = "conversacion.aviso_archivado_dias",
+                            Descripcion = "Regla 16 (A14): dias antes del archivado en que se avisa al analista.",
+                            FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Valor = "7"
+                        },
+                        new
+                        {
+                            Clave = "cierre.automatico",
+                            Descripcion = "Regla 12 (A11): el cierre de cortesia sale por defecto al descartar; el analista puede marcar no enviar.",
+                            FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Valor = "true"
+                        },
+                        new
+                        {
+                            Clave = "outbox.retencion_dias_procesados",
+                            Descripcion = "Seccion 9.6.2: dias que se conservan los eventos ya procesados de la outbox antes de purgarlos.",
+                            FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Valor = "30"
+                        },
+                        new
+                        {
+                            Clave = "datos.retencion_adjuntos_dias",
+                            Descripcion = "Regla 17: dias de retencion de los adjuntos que llegan por WhatsApp.",
+                            FechaActualizacion = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Valor = "365"
                         });
                 });
 
@@ -288,10 +407,28 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                     b.Property<int>("Estado")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("FechaAvisoFueraHorario")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FechaAvisoPendiente")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FechaAvisoSegundoNivel")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("FechaCreacion")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("FechaEscalamiento")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("FechaOptIn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FechaPendienteDesde")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FechaTextoNoReconocido")
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("FechaUltimaActividad")
@@ -302,6 +439,9 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
 
                     b.Property<DateTime?>("FechaUltimoMensajeEntrante")
                         .HasColumnType("datetime2");
+
+                    b.Property<int>("IntentosMenuFallidos")
+                        .HasColumnType("int");
 
                     b.Property<int?>("OrigenOptIn")
                         .HasColumnType("int");
@@ -331,6 +471,8 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                     b.HasIndex("AnalistaAtendiendoId", "Estado");
 
                     b.HasIndex("Estado", "FechaUltimaRespuestaAnalista");
+
+                    b.HasIndex(new[] { "Estado", "FechaUltimaActividad" }, "IX_Conversaciones_EstadoActividad");
 
                     b.ToTable("Conversaciones", (string)null);
                 });
@@ -408,6 +550,9 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                     b.Property<bool>("EsFinal")
                         .HasColumnType("bit");
 
+                    b.Property<int?>("EstadoResultante")
+                        .HasColumnType("int");
+
                     b.Property<string>("Nombre")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -449,6 +594,7 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                         {
                             EtapaId = 4,
                             EsFinal = true,
+                            EstadoResultante = 2,
                             Nombre = "Contratado",
                             Orden = 4
                         },
@@ -456,6 +602,7 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                         {
                             EtapaId = 5,
                             EsFinal = true,
+                            EstadoResultante = 3,
                             Nombre = "Descartado",
                             Orden = 5
                         });
@@ -501,7 +648,7 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
 
                     b.HasIndex("CorrelationId");
 
-                    b.HasIndex("Estado", "FechaCreacion");
+                    b.HasIndex(new[] { "Estado", "Tipo", "FechaCreacion" }, "IX_EventosSistema_Cola");
 
                     b.ToTable("EventosSistema", (string)null);
                 });
@@ -513,6 +660,10 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("HcId"));
+
+                    b.Property<string>("CodigoAviso")
+                        .HasMaxLength(12)
+                        .HasColumnType("nvarchar(12)");
 
                     b.Property<string>("CodigoJobForms")
                         .HasMaxLength(200)
@@ -542,6 +693,10 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                     b.HasKey("HcId");
 
                     b.HasIndex("CuentaId", "Estado");
+
+                    b.HasIndex(new[] { "CodigoAviso" }, "IX_HC_CodigoAviso")
+                        .IsUnique()
+                        .HasFilter("[CodigoAviso] IS NOT NULL");
 
                     b.ToTable("HC", (string)null);
                 });
@@ -703,9 +858,11 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
 
                     b.HasIndex("HcId");
 
-                    b.HasIndex("InvitacionId");
-
                     b.HasIndex("PostulanteId", "HcId");
+
+                    b.HasIndex(new[] { "InvitacionId" }, "IX_JobFormsRespuestas_Invitacion")
+                        .IsUnique()
+                        .HasFilter("[InvitacionId] IS NOT NULL");
 
                     b.ToTable("JobFormsRespuestas", (string)null);
                 });
@@ -745,6 +902,10 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                     b.Property<int>("ClaseFallo")
                         .HasColumnType("int");
 
+                    b.Property<string>("ClaveIdempotencia")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
                     b.Property<string>("Contenido")
                         .IsRequired()
                         .HasMaxLength(4096)
@@ -769,8 +930,14 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                     b.Property<DateTime>("FechaEnvio")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("FechaTomaEnvio")
+                        .HasColumnType("datetime2");
+
                     b.Property<int>("IntentosEnvio")
                         .HasColumnType("int");
+
+                    b.Property<string>("OpcionesJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ParametrosPlantillaJson")
                         .HasMaxLength(2000)
@@ -785,6 +952,11 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
 
                     b.Property<DateTime?>("ProximoIntentoUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<int>("TipoSaliente")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.HasKey("MensajeId");
 
@@ -804,7 +976,76 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                         .HasDatabaseName("IX_Mensajes_PendientesDeReintento")
                         .HasFilter("[ProximoIntentoUtc] IS NOT NULL");
 
+                    b.HasIndex(new[] { "ClaveIdempotencia" }, "IX_Mensajes_ClaveIdempotencia")
+                        .IsUnique()
+                        .HasFilter("[ClaveIdempotencia] IS NOT NULL");
+
+                    b.HasIndex(new[] { "EstadoEntrega", "FechaEnvio" }, "IX_Mensajes_EnCola")
+                        .HasFilter("[EstadoEntrega] = 6");
+
                     b.ToTable("Mensajes", (string)null);
+                });
+
+            modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.MensajeAdjunto", b =>
+                {
+                    b.Property<long>("AdjuntoId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("AdjuntoId"));
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Estado")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("FechaRecepcion")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("IntentosDescarga")
+                        .HasColumnType("int");
+
+                    b.Property<long>("MensajeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("MimeType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("NombreArchivo")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("ProveedorMedioId")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<DateTime?>("ProximoIntentoUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Ruta")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("TamanoBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TipoMedio")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.HasKey("AdjuntoId");
+
+                    b.HasIndex("MensajeId");
+
+                    b.HasIndex(new[] { "Estado", "FechaRecepcion" }, "IX_MensajesAdjuntos_Estado_FechaRecepcion");
+
+                    b.ToTable("MensajesAdjuntos", (string)null);
                 });
 
             modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.Plantilla", b =>
@@ -931,6 +1172,9 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                     b.Property<int?>("AnalistaAsignadoId")
                         .HasColumnType("int");
 
+                    b.Property<bool>("CierreCortesiaPendiente")
+                        .HasColumnType("bit");
+
                     b.Property<int>("CuentaId")
                         .HasColumnType("int");
 
@@ -940,10 +1184,19 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                     b.Property<int>("EtapaKanbanId")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("FechaAvisoArchivado")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("FechaCambioEtapa")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("FechaCierreCortesia")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("FechaCreacion")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FechaReingreso")
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("FechaUltimaActividad")
@@ -1044,6 +1297,9 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                     b.Property<DateTime?>("FechaRespuesta")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("FechaVencimiento")
+                        .HasColumnType("datetime2");
+
                     b.Property<int?>("PostulacionId")
                         .HasColumnType("int");
 
@@ -1059,13 +1315,25 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
 
                     b.HasIndex("AnalistaOrigenId");
 
-                    b.HasIndex("ConversacionId");
-
                     b.HasIndex("PostulacionId");
 
                     b.HasIndex("AnalistaDestinoId", "Estado");
 
+                    b.HasIndex(new[] { "ConversacionId" }, "IX_Transferencias_ConversacionId");
+
+                    b.HasIndex(new[] { "ConversacionId" }, "IX_Transferencias_PendienteUnica")
+                        .IsUnique()
+                        .HasFilter("[Estado] = 1");
+
                     b.ToTable("Transferencias", (string)null);
+                });
+
+            modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.AlertaOperativa", b =>
+                {
+                    b.HasOne("RRHH.WhatsApp.Domain.Entidades.Analista", null)
+                        .WithMany()
+                        .HasForeignKey("ResueltaPorAnalistaId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.AnalistaCuenta", b =>
@@ -1258,6 +1526,17 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
                     b.Navigation("Plantilla");
                 });
 
+            modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.MensajeAdjunto", b =>
+                {
+                    b.HasOne("RRHH.WhatsApp.Domain.Entidades.Mensaje", "Mensaje")
+                        .WithMany("Adjuntos")
+                        .HasForeignKey("MensajeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Mensaje");
+                });
+
             modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.Postulacion", b =>
                 {
                     b.HasOne("RRHH.WhatsApp.Domain.Entidades.Analista", "AnalistaAsignado")
@@ -1356,6 +1635,11 @@ namespace RRHH.WhatsApp.Infrastructure.Persistencia.Migraciones
             modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.Hc", b =>
                 {
                     b.Navigation("CamposOpcionales");
+                });
+
+            modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.Mensaje", b =>
+                {
+                    b.Navigation("Adjuntos");
                 });
 
             modelBuilder.Entity("RRHH.WhatsApp.Domain.Entidades.Postulante", b =>

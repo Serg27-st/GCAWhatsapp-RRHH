@@ -44,7 +44,25 @@ internal sealed class EntornoDeReglas : IDisposable
     public EnvioAnalista Envio { get; }
     public AccionesBandeja Bandeja { get; }
     public ICuentaService Cuentas { get; }
+    public IAnalistaService Analistas { get; }
+    public IUnidadTrabajo Unidad { get; }
+    public DespachoEnvios Despacho { get; }
+    public IMensajeService Mensajes { get; }
     public string CarpetaCv { get; }
+
+    /// <summary>V33: la subcarpeta de los CVs, como en produccion cuando no se configura otra.</summary>
+    public string CarpetaAdjuntos => Path.Combine(CarpetaCv, "adjuntos");
+
+    public IAlmacenamientoAdjuntos AlmacenamientoAdjuntos { get; }
+    public DescargaAdjuntos DescargaAdjuntos { get; }
+    public PurgaAdjuntos PurgaAdjuntos { get; }
+
+    /// <summary>La cadencia por defecto del Worker (appsettings), para que el arnes baje como en produccion.</summary>
+    public static readonly ParametrosDescargaAdjuntos ParametrosDescarga = new(
+        TamanoLote: 10,
+        IntentosMaximos: 5,
+        EsperaBase: TimeSpan.FromMinutes(1),
+        TiempoMaximoPorArchivo: TimeSpan.FromMinutes(5));
 
     /// <summary>
     /// Lunes 14 de setiembre de 2026, 10:00 en Lima (15:00 UTC). Dentro del horario laboral a
@@ -61,7 +79,11 @@ internal sealed class EntornoDeReglas : IDisposable
     /// <summary>Instante actual del reloj simulado, en UTC como lo guarda la base.</summary>
     public DateTime Ahora => Reloj.GetUtcNow().UtcDateTime;
 
-    public EntornoDeReglas()
+    /// <param name="decorarAuditoria">
+    /// Envuelve la auditoria real, para inyectar un fallo en medio de un evento (E16): es la ultima
+    /// accion de varias reglas, y fallar ahi deja ya encolado el mensaje de la accion anterior.
+    /// </param>
+    public EntornoDeReglas(Func<IAuditoriaService, IAuditoriaService>? decorarAuditoria = null)
     {
         var opciones = new DbContextOptionsBuilder<RrhhDbContext>()
             .UseInMemoryDatabase($"reglas-{Guid.NewGuid()}")
@@ -77,15 +99,18 @@ internal sealed class EntornoDeReglas : IDisposable
 
         var reloj = Reloj;
 
+        Unidad = new UnidadTrabajoEf(Db);
+
         Proveedor = new ProveedorSimulado(reloj, NullLogger<ProveedorSimulado>.Instance);
 
         var configuracion = new ConfiguracionReglasService(Db, new MemoryCache(new MemoryCacheOptions()), reloj);
         var horarios = new HorarioAtencionService(Db, reloj, NullLogger<HorarioAtencionService>.Instance);
-        var ausencias = new AusenciaService(Db);
-        var cuentas = new CuentaService(Db, reloj);
+        var ausencias = new AusenciaService(Db, reloj);
+        var cuentas = new CuentaService(Db, new AlertaOperativaService(Db, reloj), reloj);
         Cuentas = cuentas;
         var plantillas = new PlantillaService(Db, reloj, NullLogger<PlantillaService>.Instance);
-        var auditoria = new AuditoriaService(Db, reloj);
+        IAuditoriaService auditoria = new AuditoriaService(Db, reloj);
+        auditoria = decorarAuditoria?.Invoke(auditoria) ?? auditoria;
 
         Invitaciones = new JobFormsInvitacionService(Db, reloj, NullLogger<JobFormsInvitacionService>.Instance);
         Postulaciones = new PostulacionService(Db, reloj, NullLogger<PostulacionService>.Instance);
@@ -98,61 +123,95 @@ internal sealed class EntornoDeReglas : IDisposable
             reloj,
             NullLogger<AlmacenamientoCvLocal>.Instance);
 
-        Postulantes = new PostulanteService(Db, almacenamiento, reloj, NullLogger<PostulanteService>.Instance);
-
         Formularios = new JobFormsService(
             Db, almacenamiento, configuracion, reloj, NullLogger<JobFormsService>.Instance);
 
         var mensajes = new MensajeService(Db, reloj, NullLogger<MensajeService>.Instance);
+        Mensajes = mensajes;
 
-        Conversaciones = new ConversacionService(Db, reloj, NullLogger<ConversacionService>.Instance);
+        AlmacenamientoAdjuntos = new AlmacenamientoAdjuntosLocal(
+            Options.Create(new OpcionesAdjuntos()),
+            Options.Create(new OpcionesCv { Carpeta = CarpetaCv }),
+            new EscanerDesactivado(NullLogger<EscanerDesactivado>.Instance),
+            reloj,
+            NullLogger<AlmacenamientoAdjuntosLocal>.Instance);
+
+        DescargaAdjuntos = new DescargaAdjuntos(
+            mensajes, Proveedor, AlmacenamientoAdjuntos, reloj, NullLogger<DescargaAdjuntos>.Instance);
+
+        Conversaciones = ServiciosDePrueba.Conversaciones(Db, reloj);
         Eventos = new EventoSistemaService(Db, reloj, NullLogger<EventoSistemaService>.Instance);
 
-        var fabrica = new FabricaContextoRegla(Db, configuracion, horarios, ausencias, reloj);
+        // FUN-19: dar de baja a alguien mueve su cartera, asi que necesita el servicio de conversaciones.
+        Analistas = new AnalistaService(
+            Db, Conversaciones, new AlertaOperativaService(Db, reloj), Unidad, reloj);
 
-        // Las mismas reglas que registra AgregarReglas, en el mismo orden de prioridad.
-        IReglaNegocio[] reglas =
-        [
-            new R15OptInYVentana(),
-            new R19FallbackMenu(),
-            new R09RepreguntaEmpresa(),
-            new R14Ausencias(),
-            new R16Archivado(),
-            new R02Escalamiento(),
-            new R01Asignacion(),
-            new R20VacanteCerrada(),
-            new R09EnvioLink(),
-            new R09ConfirmacionJobForms(),
-            new R09SeguimientoJobForms(),
-            new R03FueraDeHorario(),
-            new R12CierreCortesia()
-        ];
+        // FUN-16: la anonimizacion alcanza al hilo, sus mensajes, sus archivos, la outbox y la auditoria,
+        // asi que el servicio se arma recien cuando todos esos colaboradores existen.
+        Postulantes = new PostulanteService(
+            Db, almacenamiento, AlmacenamientoAdjuntos, Conversaciones, mensajes, Eventos,
+            auditoria, Unidad, reloj, NullLogger<PostulanteService>.Instance);
 
-        var motor = new MotorReglas(reglas, NullLogger<MotorReglas>.Instance);
+        Despacho = new DespachoEnvios(
+            mensajes, Conversaciones, plantillas, Proveedor, new ValidadorEnvio(Conversaciones, plantillas),
+            configuracion, reloj, NullLogger<DespachoEnvios>.Instance);
+
+        var fabrica = new FabricaContextoRegla(Db, configuracion, horarios, ausencias, cuentas, reloj);
+
+        var motor = new MotorReglas(ReglasEnOrden(), NullLogger<MotorReglas>.Instance);
 
         var ejecutor = new EjecutorAcciones(
-            Proveedor, Conversaciones, mensajes, plantillas, Invitaciones, Postulaciones,
-            Eventos, auditoria, cuentas,
+            Conversaciones, mensajes, plantillas, Invitaciones, Postulaciones,
+            Eventos, auditoria, new AlertaOperativaService(Db, reloj), cuentas, Analistas,
             NullLogger<EjecutorAcciones>.Instance);
 
         var evaluador = new EvaluadorReglas(motor, ejecutor, NullLogger<EvaluadorReglas>.Instance);
 
         Recepcion = new RecepcionWebhook(
-            Proveedor, Conversaciones, mensajes, Eventos, NullLogger<RecepcionWebhook>.Instance);
+            Proveedor, Conversaciones, mensajes, Eventos, Unidad, NullLogger<RecepcionWebhook>.Instance);
 
         RecepcionFormulario = new RecepcionJobForms(
-            Invitaciones, Formularios, Postulantes, Postulaciones, Conversaciones, Eventos,
+            Invitaciones, Formularios, Postulantes, Postulaciones, Conversaciones, Eventos, Unidad,
             NullLogger<RecepcionJobForms>.Instance);
 
         Envio = new EnvioAnalista(
-            Proveedor, Conversaciones, mensajes, plantillas, Eventos, fabrica, motor, reloj,
+            Conversaciones, mensajes, plantillas, Eventos, auditoria, fabrica, motor, Despacho, reloj,
             NullLogger<EnvioAnalista>.Instance);
 
         Bandeja = new AccionesBandeja(Postulaciones, Eventos, NullLogger<AccionesBandeja>.Instance);
 
-        Procesador = new ProcesadorOutbox(fabrica, evaluador, NullLogger<ProcesadorOutbox>.Instance);
-        Barrido = new BarridoTiempo(fabrica, evaluador, NullLogger<BarridoTiempo>.Instance);
+        Procesador = new ProcesadorOutbox(
+            fabrica, evaluador, Postulaciones, configuracion, NullLogger<ProcesadorOutbox>.Instance);
+        Barrido = new BarridoTiempo(fabrica, evaluador, Unidad, reloj, NullLogger<BarridoTiempo>.Instance);
+
+        PurgaAdjuntos = new PurgaAdjuntos(
+            mensajes, AlmacenamientoAdjuntos, configuracion, NullLogger<PurgaAdjuntos>.Instance);
     }
+
+    /// <summary>Las mismas reglas que registra AgregarReglas, en el mismo orden de prioridad.</summary>
+    public static IReglaNegocio[] ReglasEnOrden() =>
+    [
+        new R15OptInYVentana(),
+        new R16Reactivacion(),
+        new R19FallbackMenu(),
+        new R19DerivacionPorSilencio(),
+        new R19AvisoPendiente(),
+        new R06Desambiguacion(),
+        new R09RepreguntaEmpresa(),
+        new R14Ausencias(),
+        new R08VencimientoTransferencia(),
+        new R16Archivado(),
+        new R16ArchivadoConversacion(),
+        new R02Escalamiento(),
+        new R02SegundoNivel(),
+        new R01Asignacion(),
+        new R20VacanteCerrada(),
+        new R09EnvioLink(),
+        new R09ConfirmacionJobForms(),
+        new R09SeguimientoJobForms(),
+        new R03FueraDeHorario(),
+        new R12CierreCortesia()
+    ];
 
     /// <summary>
     /// Una cuenta con vacante abierta, su analista titular y su respaldo fijo. El CuentaId 7
@@ -207,19 +266,38 @@ internal sealed class EntornoDeReglas : IDisposable
 
         await Db.SaveChangesAsync();
     }
-    /// <summary>Vacia la cola atendible, como haria una vuelta del ConsumidorOutbox.</summary>
-    public async Task<int> ConsumirOutboxAsync()
+    /// <summary>
+    /// Vacia la cola atendible, como haria una vuelta del ConsumidorOutbox.
+    /// <para>
+    /// Por defecto despacha despues, como hace el Worker a los pocos segundos (V29): las pruebas de
+    /// reglas miran lo que el bot le manda al postulante, no la cola intermedia. El arnes de
+    /// escenarios pasa <paramref name="despachar"/> en false para que el despacho sea un paso explicito.
+    /// </para>
+    /// </summary>
+    public async Task<int> ConsumirOutboxAsync(bool despachar = true)
     {
         var pendientes = await Eventos.ObtenerPendientesAsync(50, ProcesadorOutbox.TiposQueAtiende);
 
+        // Igual que ConsumidorOutbox (COR-04): cada evento con su marca de procesado, en una sola
+        // transaccion. En memoria no se deshace nada; lo que se prueba aca es el orden y que un fallo
+        // deja el evento pendiente para reintentarlo.
         foreach (var evento in pendientes)
         {
-            await Procesador.ProcesarAsync(evento);
-            await Eventos.MarcarProcesadoAsync(evento.EventoId);
+            await Unidad.EjecutarAsync(async c =>
+            {
+                await Procesador.ProcesarAsync(evento, c);
+                await Eventos.MarcarProcesadoAsync(evento.EventoId, c);
+            });
         }
+
+        if (despachar)
+            await DespacharAsync();
 
         return pendientes.Count;
     }
+
+    /// <summary>Una vuelta del despachador de envios del Worker (V29).</summary>
+    public Task<ResumenDespacho> DespacharAsync() => Despacho.ProcesarAsync(100, TimeSpan.FromMinutes(2));
 
 
     /// <summary>
@@ -250,6 +328,7 @@ internal sealed class EntornoDeReglas : IDisposable
         Reloj.Advance(lapso);
         return Task.CompletedTask;
     }
+
     public void Dispose()
     {
         Db.Dispose();

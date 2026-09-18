@@ -53,8 +53,9 @@ public class R15OptInYVentanaTests
 
         var resultado = await _regla.EvaluarAsync(ctx);
 
-        var evento = Assert.Single(resultado.Acciones.OfType<PublicarEvento>());
-        Assert.Equal("EnvioRequierePlantilla", evento.Tipo);
+        // T1.14 (V32): una señal para quien envía, no un evento de la outbox que nadie consumía.
+        Assert.Single(resultado.Acciones.OfType<RequierePlantilla>());
+        Assert.DoesNotContain(resultado.Acciones, a => a is PublicarEvento);
         Assert.DoesNotContain(resultado.Acciones, a => a is BloquearEnvio);
     }
 
@@ -74,7 +75,7 @@ public class R15OptInYVentanaTests
 
         Assert.False(ctx.VentanaServicioAbierta);
         Assert.True(ctx.TieneOptIn);
-        Assert.Contains(resultado.Acciones, a => a is PublicarEvento);
+        Assert.Contains(resultado.Acciones, a => a is RequierePlantilla);
     }
 
     [Fact]

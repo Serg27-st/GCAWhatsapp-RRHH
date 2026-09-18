@@ -35,6 +35,15 @@ public class R09SeguimientoJobFormsTests : IDisposable
         return (conversacionId, invitacion.InvitacionId);
     }
 
+
+    /// <summary>Deja la ventana de 24h cerrada, como cuando el postulante no escribe desde hace dias.</summary>
+    private async Task CerrarVentanaAsync(int conversacionId)
+    {
+        var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == conversacionId);
+        conversacion.FechaUltimoMensajeEntrante = _entorno.Ahora.AddDays(-2);
+
+        await _entorno.Db.SaveChangesAsync();
+    }
     private async Task<JobFormsInvitacion> LeerInvitacionAsync(int invitacionId) =>
         await _entorno.Db.JobFormsInvitaciones.AsNoTracking()
             .FirstAsync(i => i.InvitacionId == invitacionId);
@@ -51,14 +60,32 @@ public class R09SeguimientoJobFormsTests : IDisposable
         await _entorno.Db.SaveChangesAsync();
     }
 
+    /// <summary>COR-03 (P1): con el hilo activo la ventana sigue abierta, asi que el recordatorio sale en texto.</summary>
     [Fact]
     public async Task A_las_24_horas_sale_el_recordatorio_al_postulante()
+    {
+        var (conversacionId, invitacionId) = await ConInvitacionAsync(TimeSpan.FromHours(25));
+
+        await _entorno.Barrido.ProcesarConversacionAsync(conversacionId);
+        await _entorno.DespacharAsync();
+
+        var envio = Assert.Single(_entorno.Proveedor.Enviados, e => e.Detalle.Contains("aun no completas"));
+        Assert.Equal("texto", envio.Tipo);
+
+        Assert.True((await LeerInvitacionAsync(invitacionId)).RecordatorioEnviado);
+    }
+
+    /// <summary>Fuera de la ventana el mismo recordatorio necesita la plantilla aprobada (Regla 15).</summary>
+    [Fact]
+    public async Task Fuera_de_la_ventana_el_recordatorio_sale_como_plantilla()
     {
         await ActivarPlantillaAsync(ClavesPlantilla.RecordatorioJobForms);
 
         var (conversacionId, invitacionId) = await ConInvitacionAsync(TimeSpan.FromHours(25));
+        await CerrarVentanaAsync(conversacionId);
 
         await _entorno.Barrido.ProcesarConversacionAsync(conversacionId);
+        await _entorno.DespacharAsync();
 
         var envio = Assert.Single(_entorno.Proveedor.Enviados, e => e.Tipo == "plantilla");
         Assert.Equal(ClavesPlantilla.RecordatorioJobForms, envio.Detalle);
@@ -80,32 +107,37 @@ public class R09SeguimientoJobFormsTests : IDisposable
     [Fact]
     public async Task El_recordatorio_no_se_repite_en_el_siguiente_barrido()
     {
-        await ActivarPlantillaAsync(ClavesPlantilla.RecordatorioJobForms);
-
         var (conversacionId, _) = await ConInvitacionAsync(TimeSpan.FromHours(25));
 
         await _entorno.Barrido.ProcesarConversacionAsync(conversacionId);
+        await _entorno.DespacharAsync();
         await _entorno.Barrido.ProcesarConversacionAsync(conversacionId);
+        await _entorno.DespacharAsync();
 
-        Assert.Single(_entorno.Proveedor.Enviados, e => e.Tipo == "plantilla");
+        Assert.Single(_entorno.Proveedor.Enviados, e => e.Detalle.Contains("aun no completas"));
     }
 
+    /// <summary>
+    /// COR-03: sin ventana y sin plantilla aprobada el recordatorio no sale, y por eso tampoco se sella.
+    /// Antes se sellaba igual y el postulante no lo recibia nunca: el barrido lo daba por enviado.
+    /// </summary>
     [Fact]
-    public async Task El_recordatorio_se_sella_aunque_la_plantilla_siga_sin_aprobar()
+    public async Task Sin_ventana_y_sin_plantilla_el_recordatorio_no_sale_ni_se_sella()
     {
-        // Con la plantilla inactiva el envio se omite, pero el sello igual se pone: reintentarlo
-        // en cada barrido convertiria un tramite pendiente en una tanda de mensajes repetidos.
         var (conversacionId, invitacionId) = await ConInvitacionAsync(TimeSpan.FromHours(25));
+        await CerrarVentanaAsync(conversacionId);
 
         await _entorno.Barrido.ProcesarConversacionAsync(conversacionId);
+        await _entorno.DespacharAsync();
 
-        Assert.DoesNotContain(_entorno.Proveedor.Enviados, e => e.Tipo == "plantilla");
-        Assert.True((await LeerInvitacionAsync(invitacionId)).RecordatorioEnviado);
+        Assert.DoesNotContain(_entorno.Proveedor.Enviados, e => e.Detalle.Contains("aun no completas"));
+        Assert.False((await LeerInvitacionAsync(invitacionId)).RecordatorioEnviado);
 
-        var omitido = await _entorno.Db.EventosSistema
-            .AnyAsync(e => e.Tipo == TiposEvento.EnvioOmitidoSinPlantilla);
+        // T1.14 (V32): la plantilla que falta aprobar queda como alerta, agrupada por plantilla.
+        var alerta = await _entorno.Db.AlertasOperativas.SingleAsync();
 
-        Assert.True(omitido);
+        Assert.Equal(TiposAlerta.PlantillaNoAprobada, alerta.Tipo);
+        Assert.StartsWith("plantilla:", alerta.Clave);
     }
 
     [Fact]
@@ -114,6 +146,7 @@ public class R09SeguimientoJobFormsTests : IDisposable
         var (conversacionId, invitacionId) = await ConInvitacionAsync(TimeSpan.FromHours(49));
 
         await _entorno.Barrido.ProcesarConversacionAsync(conversacionId);
+        await _entorno.DespacharAsync();
 
         var invitacion = await LeerInvitacionAsync(invitacionId);
 

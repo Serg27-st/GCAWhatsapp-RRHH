@@ -58,6 +58,27 @@ public sealed class CuentasController(ICuentaService cuentas, ILogger<CuentasCon
     /// Regla 1 y Regla 2: pone al analista como titular o como respaldo. Cada rol es uno solo por
     /// cuenta, asi que asignar reemplaza a quien lo ocupaba.
     /// </summary>
+    /// <summary>
+    /// FUN-20: corregir el nombre o desactivar la cuenta. Desactivarla la saca del menú del bot, pero no
+    /// mueve lo que ya está en curso: si quedan conversaciones abiertas queda una alerta operativa.
+    /// </summary>
+    [HttpPatch("{id:int}")]
+    [Authorize(Policy = Politicas.Estructura)]
+    public async Task<IActionResult> Editar(
+        int id, [FromBody] PeticionEditarCuenta peticion, CancellationToken ct)
+    {
+        try
+        {
+            await cuentas.ActualizarCuentaAsync(id, peticion.Nombre, peticion.Activo, User.AnalistaId(), ct);
+
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return UnprocessableEntity(new { motivo = ex.Message });
+        }
+    }
+
     [HttpPost("{id:int}/analistas")]
     [Authorize(Policy = Politicas.Jefatura)]
     public async Task<IActionResult> Asignar(

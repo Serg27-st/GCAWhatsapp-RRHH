@@ -53,6 +53,56 @@ public class EnvioAnalistaTests : IDisposable
     }
 
     [Fact]
+    public async Task Dos_envios_con_la_misma_clave_dan_un_mensaje_y_un_envio()
+    {
+        // Doble clic, o la bandeja reintentando porque se perdió la respuesta de la Api: el
+        // postulante no puede recibir la misma respuesta dos veces (V29, T1.11).
+        var id = await ConHiloAtendidoAsync();
+        var enviadosAntes = _entorno.Proveedor.Enviados.Count;
+        var clave = Guid.NewGuid();
+
+        var primero = await _entorno.Envio.ResponderAsync(
+            id, EntornoDeReglas.TitularId, "Te escribo por la vacante.", null, null, clave);
+        var segundo = await _entorno.Envio.ResponderAsync(
+            id, EntornoDeReglas.TitularId, "Te escribo por la vacante.", null, null, clave);
+
+        Assert.True(primero.Enviado);
+        Assert.True(segundo.Enviado);
+        Assert.Equal(primero.MensajeId, segundo.MensajeId);
+        Assert.Equal(enviadosAntes + 1, _entorno.Proveedor.Enviados.Count);
+        Assert.Equal(1, await _entorno.Db.Mensajes.CountAsync(m => m.AnalistaId == EntornoDeReglas.TitularId));
+    }
+
+    [Fact]
+    public async Task Sin_clave_dos_respuestas_iguales_salen_las_dos()
+    {
+        // Una bandeja vieja que no manda clave no puede quedar bloqueada: sin clave, cada llamada es
+        // un envío distinto, como antes.
+        var id = await ConHiloAtendidoAsync();
+
+        await _entorno.Envio.ResponderAsync(id, EntornoDeReglas.TitularId, "Hola", null, null, Guid.Empty);
+        await _entorno.Envio.ResponderAsync(id, EntornoDeReglas.TitularId, "Hola", null, null, Guid.Empty);
+
+        Assert.Equal(2, await _entorno.Db.Mensajes.CountAsync(m => m.AnalistaId == EntornoDeReglas.TitularId));
+    }
+
+    [Fact]
+    public async Task La_respuesta_del_analista_queda_con_su_tipo_y_su_clave()
+    {
+        var id = await ConHiloAtendidoAsync();
+        var clave = Guid.NewGuid();
+
+        var resultado = await _entorno.Envio.ResponderAsync(
+            id, EntornoDeReglas.TitularId, "Hola", null, null, clave);
+
+        var mensaje = await _entorno.Db.Mensajes.AsNoTracking().FirstAsync(m => m.MensajeId == resultado.MensajeId);
+
+        Assert.Equal($"ana:{clave:N}", mensaje.ClaveIdempotencia);
+        Assert.Equal(TipoSaliente.Texto, mensaje.TipoSaliente);
+        Assert.Equal(EstadoEntrega.Enviado, mensaje.EstadoEntrega);
+    }
+
+    [Fact]
     public async Task Responder_detiene_el_reloj_del_escalamiento_de_la_Regla_2()
     {
         // Sin esta marca el Worker escalaria una conversacion que el analista acaba de atender.
@@ -166,10 +216,15 @@ public class EnvioAnalistaTests : IDisposable
 
         await _entorno.Envio.ResponderAsync(id, EntornoDeReglas.TitularId, "Hola", null, null);
 
-        var registrado = await _entorno.Db.EventosSistema
-            .AnyAsync(e => e.Tipo == "EnvioRequierePlantilla");
+        // T1.14 (V32): queda en la auditoría de la conversación, con quién lo intentó. Ya no se
+        // publica un evento en la outbox que nadie consumía (M1).
+        var registrado = await _entorno.Db.Auditorias
+            .AnyAsync(a => a.EntidadId == id.ToString()
+                        && a.Accion == "EnvioRequierePlantilla"
+                        && a.AnalistaId == EntornoDeReglas.TitularId);
 
         Assert.True(registrado);
+        Assert.False(await _entorno.Db.EventosSistema.AnyAsync(e => e.Tipo == "EnvioRequierePlantilla"));
     }
 
     public void Dispose() => _entorno.Dispose();

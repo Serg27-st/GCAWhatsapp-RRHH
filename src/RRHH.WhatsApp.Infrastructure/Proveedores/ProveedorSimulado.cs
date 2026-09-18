@@ -97,6 +97,27 @@ public sealed class ProveedorSimulado(
 
     public IReadOnlyList<EstadoEntregaDto> InterpretarEstados(string cuerpoCrudo) =>
         InterpreteWebhookMeta.Estados(cuerpoCrudo, reloj.GetUtcNow().UtcDateTime, log);
+
+    /// <summary>Un PDF minimo: lo que el simulado entrega por cualquier id de medio.</summary>
+    private static readonly byte[] ArchivoSimulado = "%PDF-1.4\n% archivo simulado\n%%EOF\n"u8.ToArray();
+
+    /// <summary>Los ids de medio pedidos, para que las pruebas vean que el circuito llego a descargar.</summary>
+    public List<string> MediosDescargados { get; } = [];
+
+    /// <summary>
+    /// Sin Meta no hay archivo que bajar: entrega siempre el mismo, para recorrer en desarrollo el
+    /// circuito completo de descarga, escaneo y guardado (V33).
+    /// </summary>
+    public Task<ResultadoDescarga> DescargarMedioAsync(string proveedorMedioId, CancellationToken ct = default)
+    {
+        log.LogInformation("[SIMULADO] Descarga del medio {MedioId}", proveedorMedioId);
+        MediosDescargados.Add(proveedorMedioId);
+
+        var contenido = new MemoryStream(ArchivoSimulado, writable: false);
+
+        return Task.FromResult(ResultadoDescarga.Ok(
+            new MedioDescargado(contenido, "application/pdf", ArchivoSimulado.Length)));
+    }
 }
 
 public sealed record EnvioSimulado(string Telefono, string Tipo, string Detalle);

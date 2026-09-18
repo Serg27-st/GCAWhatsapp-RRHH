@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Caching.Memory;
 using RRHH.WhatsApp.Api.Configuracion;
 using RRHH.WhatsApp.Api.Seguridad;
 using Microsoft.Extensions.Options;
@@ -25,8 +26,15 @@ public sealed class SesionController(
     IAnalistaService analistas,
     EmisorTokens emisor,
     IOptions<OpcionesArranque> arranque,
+    IMemoryCache cache,
     ILogger<SesionController> log) : ControllerBase
 {
+    /// <summary>
+    /// ARQ-11: el pipeline cachea el estado de seguridad 60 s. Lo que le quita el acceso a alguien tiene
+    /// que hacer efecto ya, no cuando expire la entrada.
+    /// </summary>
+    private void OlvidarSesion(int analistaId) => cache.Remove(VerificadorSesion.ClaveCache(analistaId));
+
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<IActionResult> Login([FromBody] PeticionLogin peticion, CancellationToken ct)
@@ -93,6 +101,7 @@ public sealed class SesionController(
         try
         {
             await autenticacion.EstablecerContrasenaAsync(id, peticion.Contrasena, ct);
+            OlvidarSesion(id);
 
             log.LogInformation(
                 "El analista {Autor} restablecio la contrasena de {Objetivo}.", User.AnalistaId(), id);
@@ -103,6 +112,24 @@ public sealed class SesionController(
         {
             return UnprocessableEntity(new { motivo = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// FUN-18: deja sin efecto todas las sesiones abiertas de un analista. Es lo que se hace cuando
+    /// alguien pierde el equipo o se va: sin esto, su token sigue entrando hasta que vence solo.
+    /// </summary>
+    [HttpPost("analistas/{id:int}/cerrar-sesiones")]
+    [Authorize(Roles = ClaimsAnalista.RolSistemas)]
+    public async Task<IActionResult> CerrarSesiones(int id, CancellationToken ct)
+    {
+        if (!await analistas.CerrarSesionesAsync(id, ct))
+            return NotFound(new { motivo = $"No existe el analista {id}." });
+
+        OlvidarSesion(id);
+
+        log.LogInformation("El analista {Autor} cerro las sesiones de {Objetivo}.", User.AnalistaId(), id);
+
+        return NoContent();
     }
 
     /// <summary>

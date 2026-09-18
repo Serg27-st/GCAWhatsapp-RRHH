@@ -59,6 +59,25 @@ internal sealed record WebhookMensaje
     [JsonPropertyName("text")] public WebhookTexto? Texto { get; init; }
     [JsonPropertyName("interactive")] public WebhookInteractivo? Interactivo { get; init; }
     [JsonPropertyName("button")] public WebhookBotonPlantilla? Boton { get; init; }
+
+    // V33: cada tipo de archivo llega bajo su propia clave, con la misma forma.
+    [JsonPropertyName("image")] public WebhookMedio? Imagen { get; init; }
+    [JsonPropertyName("document")] public WebhookMedio? Documento { get; init; }
+    [JsonPropertyName("audio")] public WebhookMedio? Audio { get; init; }
+    [JsonPropertyName("video")] public WebhookMedio? Video { get; init; }
+    [JsonPropertyName("sticker")] public WebhookMedio? Sticker { get; init; }
+}
+
+/// <summary>
+/// Un archivo entrante. El archivo no viene: <c>id</c> es lo que se usa para pedirlo, y caduca.
+/// <c>filename</c> solo lo traen los documentos; <c>caption</c>, las imagenes, videos y documentos.
+/// </summary>
+internal sealed record WebhookMedio
+{
+    [JsonPropertyName("id")] public string? Id { get; init; }
+    [JsonPropertyName("mime_type")] public string? MimeType { get; init; }
+    [JsonPropertyName("filename")] public string? NombreArchivo { get; init; }
+    [JsonPropertyName("caption")] public string? Leyenda { get; init; }
 }
 
 internal sealed record WebhookTexto

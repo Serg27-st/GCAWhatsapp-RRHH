@@ -24,7 +24,19 @@ internal sealed class ConstructorContexto
     private int _intentosMenu;
     private double? _minutosReloj;
     private double? _minutosHabiles;
-    private IReadOnlyList<Cuenta> _otrasCuentas = [];
+    private IReadOnlyList<PostulacionVigente> _postulaciones = [];
+    private DateTime? _actividadAnterior;
+    private DateTime? _inicioFueraHorario;
+    private DateTime? _proximaApertura;
+    private string? _descripcionHorario;
+    private OrigenEleccion _origen = OrigenEleccion.Ninguna;
+    private int _paginaMenu;
+    private int? _postulacionElegidaId;
+    private Transferencia? _transferenciaPendiente;
+    private bool _enviarCierreSolicitado;
+    private double? _minutosEscalamiento;
+    private double? _minutosPendiente;
+    private double? _minutosTextoNoReconocido;
     private readonly Dictionary<string, string> _config = [];
 
     public static Cuenta CuentaAlicorp => new() { CuentaId = 1, Nombre = "Alicorp" };
@@ -49,7 +61,8 @@ internal sealed class ConstructorContexto
         int? analistaAtendiendoId = null,
         DateTime? optIn = null,
         DateTime? ultimoEntrante = null,
-        int? cuentaContextoId = null)
+        int? cuentaContextoId = null,
+        DateTime? avisoFueraHorario = null)
     {
         _conversacion = new Conversacion
         {
@@ -61,6 +74,7 @@ internal sealed class ConstructorContexto
             FechaOptIn = optIn,
             OrigenOptIn = optIn is null ? null : Domain.Enums.OrigenOptIn.MensajeEntrante,
             FechaUltimoMensajeEntrante = ultimoEntrante,
+            FechaAvisoFueraHorario = avisoFueraHorario,
             FechaCreacion = _ahora.AddDays(-1),
             FechaUltimaActividad = _ahora
         };
@@ -86,7 +100,65 @@ internal sealed class ConstructorContexto
         return this;
     }
 
-    public ConstructorContexto EnOtrasCuentas(params Cuenta[] cuentas) { _otrasCuentas = cuentas; return this; }
+    /// <summary>ARQ-07: los procesos del mismo DNI, que es lo que miran la R9, la R16 y la desambiguacion.</summary>
+    public ConstructorContexto ConProcesos(params PostulacionVigente[] procesos)
+    {
+        _postulaciones = procesos;
+        return this;
+    }
+
+    /// <summary>Un proceso armado con lo minimo: la cuenta, la vacante y en que quedo.</summary>
+    public static PostulacionVigente Proceso(
+        int postulacionId,
+        EstadoPostulacion estado,
+        int cuentaId = 1,
+        string cuenta = "Alicorp",
+        int hcId = 1,
+        string vacante = "Operario de produccion",
+        int? analistaAsignadoId = 10) =>
+        new(postulacionId, cuentaId, cuenta, hcId, vacante, estado, analistaAsignadoId, Ahora.AddDays(-1));
+
+    /// <summary>C1, A13: la instantanea que tomo el webhook antes de registrar el mensaje.</summary>
+    public ConstructorContexto ActividadAnterior(DateTime? fecha) { _actividadAnterior = fecha; return this; }
+
+    public ConstructorContexto EligioPor(OrigenEleccion origen) { _origen = origen; return this; }
+
+    public ConstructorContexto PidioPagina(int pagina) { _paginaMenu = pagina; return this; }
+
+    public ConstructorContexto EligioProceso(int postulacionId) { _postulacionElegidaId = postulacionId; return this; }
+
+    public ConstructorContexto ConTransferenciaPendiente(Transferencia transferencia)
+    {
+        _transferenciaPendiente = transferencia;
+        return this;
+    }
+
+    public ConstructorContexto CierreSolicitado(bool solicitado = true)
+    {
+        _enviarCierreSolicitado = solicitado;
+        return this;
+    }
+
+    /// <summary>FUN-04: fuera de horario, desde cuando y hasta cuando, que es lo que el aviso necesita.</summary>
+    public ConstructorContexto FueraDeHorarioDesde(
+        DateTime inicio, DateTime proximaApertura, string? descripcion = "de lunes a viernes de 09:00 a 18:00")
+    {
+        _dentroDeHorario = false;
+        _inicioFueraHorario = inicio;
+        _proximaApertura = proximaApertura;
+        _descripcionHorario = descripcion;
+        return this;
+    }
+
+    /// <summary>FUN-05 y FUN-06: los plazos que corren en horas habiles, cada uno con su sello.</summary>
+    public ConstructorContexto MinutosHabiles(
+        double? desdeEscalamiento = null, double? enPendiente = null, double? desdeTextoNoReconocido = null)
+    {
+        _minutosEscalamiento = desdeEscalamiento;
+        _minutosPendiente = enPendiente;
+        _minutosTextoNoReconocido = desdeTextoNoReconocido;
+        return this;
+    }
 
     public ConstructorContexto Config(string clave, string valor) { _config[clave] = valor; return this; }
 
@@ -103,7 +175,19 @@ internal sealed class ConstructorContexto
         IntentosMenuFallidos = _intentosMenu,
         MinutosSinRespuestaReloj = _minutosReloj,
         MinutosSinRespuestaHabiles = _minutosHabiles,
-        OtrasCuentasEnProceso = _otrasCuentas,
+        PostulacionesDelPostulante = _postulaciones,
+        FechaActividadAnterior = _actividadAnterior,
+        InicioPeriodoFueraHorario = _inicioFueraHorario,
+        ProximaApertura = _proximaApertura,
+        DescripcionHorario = _descripcionHorario,
+        OrigenEleccion = _origen,
+        PaginaMenu = _paginaMenu,
+        PostulacionElegidaId = _postulacionElegidaId,
+        TransferenciaPendiente = _transferenciaPendiente,
+        EnviarCierreSolicitado = _enviarCierreSolicitado,
+        MinutosHabilesDesdeEscalamiento = _minutosEscalamiento,
+        MinutosHabilesEnPendiente = _minutosPendiente,
+        MinutosHabilesDesdeTextoNoReconocido = _minutosTextoNoReconocido,
         Configuracion = _config
     };
 }

@@ -39,7 +39,8 @@ public sealed class PostulacionesController(
 
         try
         {
-            await acciones.MoverEtapaAsync(id, peticion.EtapaId, User.AnalistaId(), ct);
+            await acciones.MoverEtapaAsync(
+                id, peticion.EtapaId, User.AnalistaId(), peticion.EnviarCierre, ct);
 
             return NoContent();
         }
@@ -47,5 +48,26 @@ public sealed class PostulacionesController(
         {
             return UnprocessableEntity(new { motivo = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// FUN-08 (A2): la persona vuelve a un proceso vivo. Mismo control de acceso que mover de etapa:
+    /// es una decisión sobre la postulación, y la toman quienes trabajan esa cuenta.
+    /// </summary>
+    [HttpPost("{id:int}/reingreso")]
+    public async Task<IActionResult> Reingreso(int id, CancellationToken ct)
+    {
+        var postulacion = await postulaciones.ObtenerPorIdAsync(id, ct);
+
+        var nivel = postulacion is null
+            ? NivelAcceso.Ninguno
+            : await cuentas.ObtenerAccesoAsync(postulacion.CuentaId, User.AnalistaId(), ct);
+
+        if (ResultadoAcceso.Evaluar(nivel, actua: true, "la postulación") is { } rechazo)
+            return rechazo;
+
+        await postulaciones.MarcarReingresoAsync(id, User.AnalistaId(), ct);
+
+        return NoContent();
     }
 }

@@ -12,6 +12,7 @@ using RRHH.WhatsApp.Api.Salud;
 using RRHH.WhatsApp.Api.TiempoReal;
 using RRHH.WhatsApp.Contracts.TiempoReal;
 using RRHH.WhatsApp.Infrastructure.Persistencia;
+using RRHH.WhatsApp.Domain.Interfaces;
 using RRHH.WhatsApp.Infrastructure;
 using RRHH.WhatsApp.Reporting;
 
@@ -38,6 +39,9 @@ if (!jwt.EstaConfigurada)
 }
 builder.Services.Configure<OpcionesJwt>(builder.Configuration.GetSection(OpcionesJwt.Seccion));
 builder.Services.AddSingleton<EmisorTokens>();
+
+// ARQ-11 (V34): lo consulta el pipeline en cada peticion, con su cache de 60 s.
+builder.Services.AddSingleton<VerificadorSesion>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(opciones =>
@@ -72,6 +76,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 }
 
                 return Task.CompletedTask;
+            },
+
+            // ARQ-11 (V34): la firma del token puede seguir siendo valida y el acceso ya no
+            // corresponder. Va aca y no en cada endpoint para que alcance tambien al hub, que
+            // autentica con este mismo esquema.
+            OnTokenValidated = async contexto =>
+            {
+                var servicios = contexto.HttpContext.RequestServices;
+
+                var motivo = await servicios.GetRequiredService<VerificadorSesion>().RevisarAsync(
+                    contexto.Principal!,
+                    servicios.GetRequiredService<IAnalistaService>(),
+                    contexto.HttpContext.RequestAborted);
+
+                if (motivo is not null)
+                    contexto.Fail(motivo);
             }
         };
     });
@@ -94,9 +114,14 @@ builder.Services.AddHostedService<DifusorNotificaciones>();
 // los que hacen que /health signifique algo.
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<RrhhDbContext>("base", tags: ["listo"])
-    .AddCheck<ChequeoWorker>("worker", tags: ["listo"]);
+    .AddCheck<ChequeoWorker>("worker", tags: ["listo"])
+    // V32: Degraded, no Unhealthy. Una plantilla sin aprobar no tumba nada, pero deja postulantes sin respuesta.
+    .AddCheck<ChequeoAlertas>("alertas");
 
 builder.Services.Configure<OpcionesJobForms>(builder.Configuration.GetSection(OpcionesJobForms.Seccion));
+
+// FUN-02 (A6): el numero publico con el que se arman los enlaces de los avisos de cada vacante.
+builder.Services.Configure<OpcionesWhatsApp>(builder.Configuration.GetSection(OpcionesWhatsApp.Seccion));
 
 // V25: el correo del primer analista de Sistemas, para poner en marcha una base nueva.
 builder.Services.Configure<OpcionesArranque>(builder.Configuration.GetSection(OpcionesArranque.Seccion));

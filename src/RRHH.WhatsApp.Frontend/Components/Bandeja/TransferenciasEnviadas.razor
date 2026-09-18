@@ -1,0 +1,70 @@
+@inject ClienteApi Api
+
+@* FUN-07: lo que quien está en sesión ofreció y todavía espera respuesta. Sin esta lista, una
+   transferencia mal dirigida solo se podía deshacer esperando a que venciera, y mientras tanto
+   bloqueaba cualquier otra derivación de esa conversación (V21). *@
+@if (Enviadas.Count > 0)
+{
+    <section class="transferencias-enviadas">
+        <h3>Transferencias que enviaste <span class="cantidad">@Enviadas.Count</span></h3>
+
+        @foreach (var transferencia in Enviadas)
+        {
+            <div class="transferencia" @key="transferencia.TransferenciaId">
+                <div class="fila-cabecera">
+                    <span class="nombre">@(transferencia.NombrePostulante ?? "Postulante sin identificar")</span>
+                    <span class="fecha">@HoraLima.Hace(transferencia.FechaUtc)</span>
+                </div>
+
+                <div class="fila-detalle">
+                    <span>para @transferencia.AnalistaDestino</span>
+
+                    @if (transferencia.FechaVencimiento is { } vence)
+                    {
+                        <span class="vence" title="Si no responde, vuelve a vos">vence @HoraLima.Hace(vence)</span>
+                    }
+                </div>
+
+                <div class="dialogo-acciones">
+                    <button class="btn btn-outline-danger" disabled="@(_retirando is not null)"
+                            @onclick="() => Retirar(transferencia)">Retirar</button>
+                </div>
+
+                @if (_errores.TryGetValue(transferencia.TransferenciaId, out var error))
+                {
+                    <p class="error">@error</p>
+                }
+            </div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<TransferenciaEnviada> Enviadas { get; set; } = [];
+
+    /// <summary>Avisa que una se retiró, para que la bandeja vuelva a pedir las listas.</summary>
+    [Parameter] public EventCallback AlRetirar { get; set; }
+
+    private readonly Dictionary<int, string> _errores = new();
+    private int? _retirando;
+
+    private async Task Retirar(TransferenciaEnviada transferencia)
+    {
+        _retirando = transferencia.TransferenciaId;
+        _errores.Remove(transferencia.TransferenciaId);
+
+        var respuesta = await Api.RetirarTransferenciaAsync(transferencia.TransferenciaId);
+
+        _retirando = null;
+
+        if (!respuesta.Exito)
+        {
+            // Lo habitual es que el destino la haya respondido mientras tanto: ya no hay nada que
+            // retirar, y el motivo lo explica hasta el próximo refresco.
+            _errores[transferencia.TransferenciaId] = respuesta.Motivo ?? "No se pudo retirar.";
+            return;
+        }
+
+        await AlRetirar.InvokeAsync();
+    }
+}

@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using RRHH.WhatsApp.Api.Controllers;
@@ -82,6 +83,36 @@ public class ParametrosReglasTests
     public async Task Un_texto_admite_cualquier_valor()
     {
         Assert.IsType<NoContentResult>(await GuardarAsync("datos.version_aviso_privacidad", "v2"));
+    }
+
+    /// <summary>
+    /// T2.10: una clave declarada en <see cref="Domain.Entidades.ClavesConfiguracion"/> que no está en la
+    /// semilla no se puede editar desde la pantalla (no existe) y la regla usa su valor por defecto en
+    /// silencio. Pasaba con cada parámetro nuevo que alguien se olvidaba de sembrar.
+    /// </summary>
+    [Fact]
+    public void Toda_clave_de_configuracion_esta_sembrada()
+    {
+        var claves = typeof(Domain.Entidades.ClavesConfiguracion)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral)
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .ToList();
+
+        using var db = new Infrastructure.Persistencia.RrhhDbContext(
+            new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<Infrastructure.Persistencia.RrhhDbContext>()
+                .UseInMemoryDatabase($"claves-{Guid.NewGuid()}")
+                .Options);
+
+        var sembradas = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions
+            .GetService<Microsoft.EntityFrameworkCore.Metadata.IDesignTimeModel>(db).Model
+            .FindEntityType(typeof(Domain.Entidades.ConfiguracionRegla))!
+            .GetSeedData()
+            .Select(fila => (string)fila[nameof(Domain.Entidades.ConfiguracionRegla.Clave)]!)
+            .ToHashSet();
+
+        Assert.NotEmpty(claves);
+        Assert.All(claves, clave => Assert.Contains(clave, sembradas));
     }
 
     [Fact]

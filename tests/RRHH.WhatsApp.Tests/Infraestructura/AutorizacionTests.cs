@@ -25,16 +25,30 @@ public class AutorizacionTests
         Nombre<ConversacionesController>(nameof(ConversacionesController.Transferir)),
         Nombre<ConversacionesController>(nameof(ConversacionesController.Marcar)),
 
+        // FUN-01: tomar corre con nivel Lectura ([PermiteTomar]) y el servicio exige que el analista
+        // trabaje la cuenta elegida. Una politica fija no alcanza: depende de la cuenta del cuerpo.
+        Nombre<ConversacionesController>(nameof(ConversacionesController.Tomar)),
+
         // Regla 8: solo el analista destino.
         Nombre<TransferenciasController>(nameof(TransferenciasController.Responder)),
 
+        // FUN-07: solo quien la envio, y solo mientras nadie la haya respondido.
+        Nombre<TransferenciasController>(nameof(TransferenciasController.Retirar)),
+
         // Regla 13 y V22: por la cuenta de la postulacion.
         Nombre<PostulacionesController>(nameof(PostulacionesController.MoverEtapa)),
+
+        // FUN-08: el reingreso lo decide quien trabaja la cuenta, igual que el movimiento de etapa.
+        Nombre<PostulacionesController>(nameof(PostulacionesController.Reingreso)),
 
         // V23: por la cuenta de la vacante.
         Nombre<VacantesController>(nameof(VacantesController.Crear)),
         Nombre<VacantesController>(nameof(VacantesController.Cerrar)),
         Nombre<VacantesController>(nameof(VacantesController.GuardarCampos)),
+
+        // FUN-20: corregir o reabrir una vacante es de quien la trabaja, igual que crearla o cerrarla.
+        Nombre<VacantesController>(nameof(VacantesController.Editar)),
+        Nombre<VacantesController>(nameof(VacantesController.Reabrir)),
 
         // Regla 14: la propia, o Jefatura y Sistemas la de cualquiera.
         Nombre<AnalistasController>(nameof(AnalistasController.RegistrarAusencia)),
@@ -83,7 +97,20 @@ public class AutorizacionTests
             (typeof(AnalistasController), nameof(AnalistasController.Crear), Politicas.Estructura),
             (typeof(ConfiguracionController), nameof(ConfiguracionController.GuardarHorario), Politicas.Estructura),
             (typeof(ConfiguracionController), nameof(ConfiguracionController.GuardarParametro), Politicas.Estructura),
-            (typeof(ReportesController), nameof(ReportesController.Metricas), Politicas.Jefatura)
+            (typeof(ReportesController), nameof(ReportesController.Metricas), Politicas.Jefatura),
+
+            // FUN-15: Jefatura ve lo que hay que arreglar; resolverlo es de Sistemas, que es quien lo
+            // arregla —activar una plantilla, cargar un formulario— y quien responde por darlo por hecho.
+            (typeof(OperacionController), nameof(OperacionController.Listar), Politicas.Jefatura),
+            (typeof(OperacionController), nameof(OperacionController.Resolver), Politicas.Estructura),
+
+            // FUN-19: dar de baja o cambiar el rol es estructura; ver qué tiene encima alguien antes de
+            // tocarlo es de quien decide la cobertura.
+            (typeof(AnalistasController), nameof(AnalistasController.Editar), Politicas.Estructura),
+            (typeof(AnalistasController), nameof(AnalistasController.Cartera), Politicas.Jefatura),
+
+            // FUN-20: desactivar una cuenta la saca del menú del bot; es estructura, como crearla.
+            (typeof(CuentasController), nameof(CuentasController.Editar), Politicas.Estructura)
         ];
 
         var faltan = esperados

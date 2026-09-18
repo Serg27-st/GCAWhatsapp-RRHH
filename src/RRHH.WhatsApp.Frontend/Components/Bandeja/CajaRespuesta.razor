@@ -86,7 +86,29 @@
     private bool _enviando;
     private ResultadoResponder? _resultado;
 
+    /// <summary>
+    /// Identifica el mensaje que se esta redactando (V29). Se conserva si el envio falla o no llega
+    /// respuesta, para que reintentar no lo mande dos veces; se renueva recien cuando salio.
+    /// </summary>
+    private Guid _claveIdempotencia = Guid.NewGuid();
+
     protected override async Task OnInitializedAsync() => _plantillas = await Api.PlantillasAsync();
+
+    /// <summary>
+    /// FUN-13: carga en la caja el texto de un mensaje que no llegó, sin enviarlo. Es otro mensaje que
+    /// el que se estaba redactando, así que lleva una clave nueva (V29): con la anterior, la Api
+    /// devolvería el resultado del borrador reemplazado y este no saldría.
+    /// </summary>
+    public void Proponer(string texto)
+    {
+        _texto = texto;
+        _clavePlantilla = string.Empty;
+        _parametros = [];
+        _resultado = null;
+        _claveIdempotencia = Guid.NewGuid();
+
+        StateHasChanged();
+    }
 
     private PlantillaResumen? Elegida() =>
         _plantillas.FirstOrDefault(p => p.Clave == _clavePlantilla);
@@ -128,7 +150,8 @@
         _resultado = await Api.ResponderAsync(Detalle.Resumen.ConversacionId, new PeticionResponder(
             string.IsNullOrEmpty(_clavePlantilla) ? _texto : null,
             string.IsNullOrEmpty(_clavePlantilla) ? null : _clavePlantilla,
-            string.IsNullOrEmpty(_clavePlantilla) ? null : _parametros));
+            string.IsNullOrEmpty(_clavePlantilla) ? null : _parametros,
+            _claveIdempotencia));
 
         _enviando = false;
 
@@ -137,6 +160,7 @@
             _texto = string.Empty;
             _clavePlantilla = string.Empty;
             _parametros = [];
+            _claveIdempotencia = Guid.NewGuid();
 
             await AlEnviar.InvokeAsync();
         }

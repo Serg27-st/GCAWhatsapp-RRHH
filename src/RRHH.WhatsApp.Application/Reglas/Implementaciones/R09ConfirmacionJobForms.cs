@@ -28,14 +28,18 @@ public sealed class R09ConfirmacionJobForms : IReglaNegocio
     public Task<ResultadoRegla> EvaluarAsync(ContextoRegla ctx, CancellationToken ct = default)
     {
         var vacante = ctx.Hc?.Titulo ?? ctx.Invitacion?.Hc?.Titulo ?? "la vacante";
+        var nombre = ctx.Postulante?.NombreCompleto;
 
         return Task.FromResult(ResultadoRegla.Con(
             // Completar el formulario es consentimiento por derecho propio (Regla 15). Si ya
             // estaba sellado por el mensaje entrante, esto no lo mueve.
             new RegistrarOptIn(OrigenOptIn.JobFormsCompletado),
-            new EnviarPlantilla(
+            // COR-03 (P1): dentro de la ventana sale en texto. Con EnviarPlantilla el postulante no
+            // recibia nada, porque la plantilla sigue esperando la aprobacion de Meta (C3).
+            new EnviarMensajeBot(
+                TextosBot.ConfirmacionFormulario(nombre, vacante),
                 ClavesPlantilla.ConfirmacionJobForms,
-                [ctx.Postulante?.NombreCompleto ?? "hola", vacante]),
+                [nombre ?? "hola", vacante]),
             new RegistrarAuditoria(
                 "JobFormsCompletado",
                 $"Formulario recibido para {vacante}.")));

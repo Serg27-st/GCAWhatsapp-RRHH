@@ -38,18 +38,21 @@ public sealed class R09SeguimientoJobForms : IReglaNegocio
 
         if (!invitacion.RecordatorioEnviado && horas >= horasRecordatorio)
         {
-            acciones.Add(new EnviarPlantilla(
-                ClavesPlantilla.RecordatorioJobForms,
-                [
-                    ctx.Postulante?.NombreCompleto ?? "hola",
-                    invitacion.Hc?.Titulo ?? "la vacante",
-                    ctx.EnlaceInvitacion ?? string.Empty
-                ]));
+            var nombre = ctx.Postulante?.NombreCompleto;
+            var vacante = invitacion.Hc?.Titulo ?? "la vacante";
+            var enlace = ctx.EnlaceInvitacion ?? string.Empty;
 
-            // Se sella aunque el envio termine omitido por falta de plantilla aprobada. Reintentar
-            // en cada barrido convertiria un problema de configuracion en una tanda de mensajes
-            // repetidos, que es exactamente lo que eleva los reportes de spam (Seccion 2.4).
-            acciones.Add(new MarcarRecordatorioJobForms(invitacion.InvitacionId));
+            // A las 24h de silencio la ventana suele estar cerrada, asi que este suele salir como
+            // plantilla; el texto vale cuando el postulante escribio algo mientras tanto (COR-03).
+            acciones.Add(new EnviarMensajeBot(
+                TextosBot.RecordatorioFormulario(nombre, vacante, enlace),
+                ClavesPlantilla.RecordatorioJobForms,
+                [nombre ?? "hola", vacante, enlace]));
+
+            // COR-03: solo se sella si el recordatorio llego a encolarse. Sellarlo igual —como se hacia
+            // antes— lo perdia para siempre: el barrido lo daba por enviado y el postulante nunca lo
+            // recibia. Sin sello y sin envio, la alerta agrupada pide aprobar la plantilla (V32).
+            acciones.Add(new MarcarRecordatorioJobForms(invitacion.InvitacionId) { SoloSiSeEnvioAnterior = true });
         }
 
         // Si el hilo todavia no tiene analista no hay a quien avisarle: se deja pendiente para

@@ -1,5 +1,7 @@
 using RRHH.WhatsApp.Api.Seguridad;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using RRHH.WhatsApp.Api.Configuracion;
 using RRHH.WhatsApp.Api.Mapeo;
 using RRHH.WhatsApp.Contracts.Administracion;
 using RRHH.WhatsApp.Contracts.Bandeja;
@@ -23,13 +25,18 @@ namespace RRHH.WhatsApp.Api.Controllers;
 public sealed class VacantesController(
     ICuentaService cuentas,
     IPostulacionService postulaciones,
+    IOptions<OpcionesWhatsApp> whatsapp,
     ILogger<VacantesController> log) : ControllerBase
 {
-    /// <summary>Vacantes abiertas de una cuenta, que es lo que el bot ofrece en el menu.</summary>
+    /// <summary>
+    /// Vacantes abiertas de una cuenta, que es lo que el bot ofrece en el menu. Con
+    /// <paramref name="incluirCerradas"/> tambien las cerradas, para poder reabrir una (FUN-20).
+    /// </summary>
     [HttpGet]
-    public async Task<IActionResult> Listar([FromQuery] int cuentaId, CancellationToken ct)
+    public async Task<IActionResult> Listar(
+        [FromQuery] int cuentaId, CancellationToken ct, [FromQuery] bool incluirCerradas = false)
     {
-        var vacantes = await cuentas.ListarVacantesAbiertasAsync(cuentaId, ct);
+        var vacantes = await cuentas.ListarVacantesDeCuentaAsync(cuentaId, incluirCerradas, ct);
 
         return Ok(vacantes.Select(AResumen));
     }
@@ -63,6 +70,76 @@ public sealed class VacantesController(
         {
             return UnprocessableEntity(new { motivo = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// FUN-02 (A6): el codigo del aviso y su enlace, para pegarlo en la publicacion de la vacante.
+    /// Lo ven quienes manejan la vacante —titular, respaldo y Sistemas—, igual que para editarla.
+    /// </summary>
+    [HttpGet("{id:int}/enlace-aviso")]
+    public async Task<IActionResult> EnlaceDeAviso(int id, CancellationToken ct)
+    {
+        var vacante = await cuentas.ObtenerVacanteAsync(id, ct);
+
+        if (vacante is null)
+            return NotFound(new { motivo = $"No existe la vacante {id}." });
+
+        if (await RechazarSiNoTrabajaLaCuentaAsync(vacante.CuentaId, ct) is { } rechazo)
+            return rechazo;
+
+        // Las vacantes anteriores al codigo de aviso pueden no tenerlo: la migracion las completo,
+        // pero una base restaurada de antes, no. Sin codigo no hay enlace que ofrecer.
+        if (vacante.CodigoAviso is not { } codigo || string.IsNullOrWhiteSpace(codigo))
+            return UnprocessableEntity(new { motivo = "La vacante todavia no tiene codigo de aviso." });
+
+        return Ok(new EnlaceAviso(codigo, whatsapp.Value.EnlaceDeAviso(codigo)));
+    }
+
+    /// <summary>
+    /// FUN-20: corregir lo que se cargó mal —el título, el enlace del formulario, el código del aviso—.
+    /// Lo que no viene no se toca.
+    /// </summary>
+    [HttpPatch("{id:int}")]
+    public async Task<IActionResult> Editar(
+        int id, [FromBody] PeticionEditarVacante peticion, CancellationToken ct)
+    {
+        var vacante = await cuentas.ObtenerVacanteAsync(id, ct);
+
+        if (vacante is null)
+            return NotFound(new { motivo = $"No existe la vacante {id}." });
+
+        if (await RechazarSiNoTrabajaLaCuentaAsync(vacante.CuentaId, ct) is { } rechazo)
+            return rechazo;
+
+        try
+        {
+            await cuentas.ActualizarVacanteAsync(
+                id, peticion.Titulo, peticion.UrlJobForms, peticion.CodigoAviso, User.AnalistaId(), ct);
+
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // 422 y no 400: la petición es válida, lo que no corresponde es el valor que trae.
+            return UnprocessableEntity(new { motivo = ex.Message });
+        }
+    }
+
+    /// <summary>FUN-20: una vacante cerrada por error vuelve a recibir postulantes.</summary>
+    [HttpPatch("{id:int}/reabrir")]
+    public async Task<IActionResult> Reabrir(int id, CancellationToken ct)
+    {
+        var vacante = await cuentas.ObtenerVacanteAsync(id, ct);
+
+        if (vacante is null)
+            return NotFound(new { motivo = $"No existe la vacante {id}." });
+
+        if (await RechazarSiNoTrabajaLaCuentaAsync(vacante.CuentaId, ct) is { } rechazo)
+            return rechazo;
+
+        await cuentas.ReabrirVacanteAsync(id, User.AnalistaId(), ct);
+
+        return NoContent();
     }
 
     /// <summary>Regla 20: al cerrarla, su enlace deja de servir y el bot deja de ofrecerla.</summary>
@@ -185,7 +262,8 @@ public sealed class VacantesController(
         var columnas = etapas
             .Select(e => new EtapaTablero(
                 e.EtapaId, e.Nombre, e.Orden,
-                [.. porEtapa[e.EtapaId].Select(p => p.AResumen())]))
+                [.. porEtapa[e.EtapaId].Select(p => p.AResumen())],
+                e.EstadoResultante?.ToString()))
             .ToList();
 
         return Ok(new TableroKanban(id, vacante!.Titulo, columnas));
@@ -194,7 +272,7 @@ public sealed class VacantesController(
     /// <summary>Sin formulario el bot no puede mandar el enlace (Regla 9): la pantalla lo marca.</summary>
     private static VacanteResumen AResumen(Hc vacante) =>
         new(vacante.HcId, vacante.CuentaId, vacante.Titulo, vacante.Estado.ToString(),
-            !string.IsNullOrWhiteSpace(vacante.UrlJobForms));
+            !string.IsNullOrWhiteSpace(vacante.UrlJobForms), vacante.CodigoAviso);
 
     /// <summary>
     /// Nulo si quien pide trabaja la cuenta o es Sistemas. Aca un 403 no revela nada: la lista de

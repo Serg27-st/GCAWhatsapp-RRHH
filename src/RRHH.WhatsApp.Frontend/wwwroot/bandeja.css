@@ -63,7 +63,7 @@
 .fila-cabecera .pendiente { color: var(--alerta); }
 .fila-detalle { display: flex; gap: 0.6rem; color: var(--tenue); font-size: 0.8rem; }
 
-.ventana-cerrada, .multicuenta {
+.ventana-cerrada, .multicuenta, .vencida {
     display: inline-block;
     margin-top: 0.25rem;
     font-size: 0.74rem;
@@ -73,6 +73,9 @@
 
 .ventana-cerrada { background: var(--aviso-fondo); color: var(--aviso); }
 .multicuenta { background: #e8f0fe; color: #1a4b8c; }
+
+/* FUN-05: rojo y en negrita. Es la unica marca de la lista que pide accion inmediata. */
+.vencida { background: #fdecea; color: #a4262c; font-weight: 600; }
 
 /* Chat */
 .panel-chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -105,6 +108,20 @@
 .mensaje.saliente { align-self: flex-end; background: var(--acento-suave); }
 .mensaje .meta { display: block; margin-top: 0.2rem; font-size: 0.72rem; color: var(--tenue); }
 .etiqueta-plantilla, .etiqueta-bot { margin-left: 0.4rem; padding: 0 0.3rem; border-radius: 6px; background: rgba(0,0,0,0.06); }
+
+/* FUN-13: estado de entrega de lo que sale. El fallido se ve sin pasar el mouse. */
+.entrega { margin-left: 0.4rem; cursor: default; }
+.entrega.leido { color: #1a73e8; }
+.entrega.fallido { color: #a4262c; font-weight: 600; }
+.mensaje.saliente.fallido { background: #fdecea; }
+.motivo-fallo { display: block; margin-top: 0.2rem; font-size: 0.75rem; color: #a4262c; }
+
+/* FUN-14: los archivos del postulante, dentro del mensaje. */
+.adjunto { display: block; margin-top: 0.25rem; font-size: 0.8rem; }
+.adjunto .btn-link { padding: 0; font-size: 0.8rem; }
+.adjunto .no-disponible { color: var(--tenue); font-style: italic; }
+.aviso-adjunto { margin: 0.4rem 1rem 0; font-size: 0.85rem; }
+.motivo-fallo .btn-link { padding: 0 0 0 0.3rem; font-size: 0.75rem; vertical-align: baseline; }
 
 /* Respuesta */
 .caja-respuesta { border-top: 1px solid var(--borde); padding: 0.7rem 1rem; background: var(--panel); }
@@ -148,14 +165,14 @@
 .aviso-vivo .senal.activa { color: #2e7d32; }
 
 /* Transferencias esperando respuesta (Regla 8). Color de aviso: es algo pendiente de uno mismo. */
-.transferencias-recibidas {
+.transferencias-recibidas, .transferencias-enviadas {
     max-height: 40vh;
     overflow-y: auto;
     background: var(--aviso-fondo);
     border-bottom: 1px solid var(--borde);
 }
 
-.transferencias-recibidas h3 {
+.transferencias-recibidas h3, .transferencias-enviadas h3 {
     margin: 0;
     padding: 0.45rem 0.7rem 0.2rem;
     color: var(--aviso);
@@ -164,7 +181,11 @@
     letter-spacing: 0.03em;
 }
 
-.transferencias-recibidas .cantidad { float: right; }
+.transferencias-recibidas .cantidad, .transferencias-enviadas .cantidad { float: right; }
+
+/* FUN-07: lo enviado es informativo, no una tarea propia: mismo formato, sin el fondo de aviso. */
+.transferencias-enviadas { background: transparent; }
+.transferencia .vence { color: var(--aviso); }
 .transferencia { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.45rem 0.7rem 0.6rem; }
 .transferencia + .transferencia { border-top: 1px solid var(--borde); }
 .transferencia .comentario { margin: 0; font-size: 0.82rem; font-style: italic; }

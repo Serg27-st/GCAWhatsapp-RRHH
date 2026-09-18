@@ -66,6 +66,13 @@ Reparto de responsabilidades que se cruzan a menudo:
   de envío viven en `ConfiguracionReglas` y se leen vía `ContextoRegla.ConfigInt/ConfigBool`.
 - **Comentarios que expliquen el porqué**, no el qué, y siempre atados a la regla o sección del
   dossier que justifican la decisión. Sigue la densidad y el tono del código ya escrito.
+- **Una regla por tiempo mira el hilo o el proceso** (V37). `TiempoTranscurrido` evalúa una vez por
+  conversación y `TiempoTranscurridoPostulacion`, una vez por postulación. Con el disparador
+  equivocado, la regla se repite por cada proceso o no ve ninguno.
+- **El orden de las reglas vive en un solo lugar:** `AgregarReglas` de
+  `Infrastructure/RegistroDependencias.cs`, en orden de `Prioridad`. Una regla nueva es una línea
+  ahí y una prioridad que no choque con ninguna: `RegistroDependenciasTests` falla si dos comparten
+  prioridad, si el motor no las recibe todas, o si el entorno de pruebas quedó desalineado.
 - **Un `Conversacion` es el hilo de WhatsApp** (uno por número de teléfono). Un `Postulacion` es
   el proceso (persona + vacante) y es lo que recorre el kanban. No los mezcles: la razón está en
   `docs/decisiones.md`, desviación V1.
@@ -82,6 +89,16 @@ produzca un mensaje saliente:
   No las actives desde código ni desde una migración.
 - **Velocidad de envío** — el adaptador limita el saliente (`envio.maximo_por_segundo`). No lo
   puentees.
+- **El bot no envía: encola** (V29). Las acciones de envío se registran en `Mensajes` como `EnCola`
+  con `ClaveIdempotencia` y las manda `DespachoEnvios`. Nada fuera de `DespachoEnvios` y de la
+  respuesta del analista llama a `IWhatsAppProvider` para enviar, y no hay reintentos HTTP implícitos.
+- **Dentro de la ventana, el bot habla en texto** (P1, COR-03). Los mensajes del bot son
+  `EnviarMensajeBot(texto, clavePlantilla, parametros)`: con la ventana de 24h abierta sale el
+  texto, cerrada sale la plantilla activa, y sin ninguna de las dos no sale nada y queda una
+  `AlertaOperativa`. Los textos viven en `Application/Reglas/TextosBot.cs`, en paralelo a los
+  borradores de `DatosSemilla`: si cambia uno, cambia el otro. Lo que sella un envío
+  (`SellarConversacion`, `SellarPostulacion`, `MarcarRecordatorioJobForms`) lleva
+  `SoloSiSeEnvioAnterior = true`, porque sellar algo que no salió lo pierde para siempre.
 
 ## Verificación
 

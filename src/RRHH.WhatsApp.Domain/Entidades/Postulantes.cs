@@ -47,6 +47,21 @@ public class Postulacion
     public DateTime FechaUltimaActividad { get; set; }
     public DateTime? FechaCambioEtapa { get; set; }
 
+    /// <summary>
+    /// A11: el descarte pide cierre de cortesia pero todavia no salio —por ejemplo porque se descarto
+    /// fuera de horario—. El barrido lo manda en horario laboral y una sola vez.
+    /// </summary>
+    public bool CierreCortesiaPendiente { get; set; }
+
+    /// <summary>A11: sello del cierre de cortesia enviado. Descartar dos veces no lo repite (P4).</summary>
+    public DateTime? FechaCierreCortesia { get; set; }
+
+    /// <summary>A14: sello del aviso al analista antes de archivar por inactividad.</summary>
+    public DateTime? FechaAvisoArchivado { get; set; }
+
+    /// <summary>A2: cuando el analista marco el reingreso.</summary>
+    public DateTime? FechaReingreso { get; set; }
+
     /// <summary>Control de concurrencia optimista: el Worker y el analista pueden tocar la misma fila (Seccion 9.6.2).</summary>
     public byte[]? RowVersion { get; set; }
 
@@ -80,4 +95,11 @@ public class EtapaKanban
     public required string Nombre { get; set; }
     public int Orden { get; set; }
     public bool EsFinal { get; set; }
+
+    /// <summary>
+    /// El desenlace que implica llegar a esta columna (COR-11). Antes se deducia por el nombre de la
+    /// etapa, y renombrar «Descartado» en la administracion rompia el cierre de cortesia. Nulo en las
+    /// columnas intermedias.
+    /// </summary>
+    public EstadoPostulacion? EstadoResultante { get; set; }
 }

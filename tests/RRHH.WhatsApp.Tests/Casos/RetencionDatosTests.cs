@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using RRHH.WhatsApp.Domain.Entidades;
+using RRHH.WhatsApp.Domain.Enums;
 using RRHH.WhatsApp.Domain.Interfaces;
 using RRHH.WhatsApp.Tests.Proveedores;
 
@@ -27,6 +28,21 @@ public class RetencionDatosTests : IDisposable
         var contenido = new MemoryStream(Encoding.UTF8.GetBytes("%PDF-1.4 cv de prueba"));
 
         return await _entorno.Formularios.AlmacenarCvAsync(contenido, "cv.pdf", "application/pdf");
+    }
+
+    /// <summary>
+    /// A5 (FUN-16): el plazo del CV corre desde la última actividad de la persona, no desde el envío.
+    /// Un proceso vivo sostiene el archivo, así que para que la purga lo mire hay que dejar la
+    /// postulación terminada y quieta, como pasa con quien nunca volvió.
+    /// </summary>
+    private async Task SinProcesoVivoAsync(int diasDeAntiguedad)
+    {
+        var postulacion = await _entorno.Db.Postulaciones.FirstAsync();
+
+        postulacion.Estado = EstadoPostulacion.Descartado;
+        postulacion.FechaUltimaActividad = _entorno.Ahora.AddDays(-diasDeAntiguedad);
+
+        await _entorno.Db.SaveChangesAsync();
     }
 
     /// <summary>Deja una respuesta con CV propio, ya vencida segun el plazo indicado.</summary>
@@ -77,6 +93,7 @@ public class RetencionDatosTests : IDisposable
     {
         var ruta = await GuardarCvAsync();
         var respuestaId = await ConCvVencidoAsync(ruta, diasDeAntiguedad: 400);
+        await SinProcesoVivoAsync(diasDeAntiguedad: 400);
 
         var vencidas = await _entorno.Formularios.ListarCvsPorPurgarAsync(diasRetencion: 365, maximo: 50);
         Assert.Contains(vencidas, r => r.RespuestaId == respuestaId);
@@ -102,11 +119,42 @@ public class RetencionDatosTests : IDisposable
         Assert.DoesNotContain(vencidas, r => r.RespuestaId == respuestaId);
     }
 
+    /// <summary>A5 (FUN-16): el CV de alguien que sigue en un proceso no se borra, por viejo que sea.</summary>
+    [Fact]
+    public async Task No_se_purga_el_CV_de_quien_sigue_en_proceso()
+    {
+        var ruta = await GuardarCvAsync();
+        var respuestaId = await ConCvVencidoAsync(ruta, diasDeAntiguedad: 400);
+
+        Assert.Equal(EstadoPostulacion.EnProceso, (await _entorno.Db.Postulaciones.AsNoTracking().FirstAsync()).Estado);
+
+        var vencidas = await _entorno.Formularios.ListarCvsPorPurgarAsync(diasRetencion: 365, maximo: 50);
+
+        Assert.DoesNotContain(vencidas, r => r.RespuestaId == respuestaId);
+    }
+
+    /// <summary>
+    /// A5: lo que cuenta es la última actividad de la persona. Un descarte reciente sostiene el CV
+    /// aunque el formulario se haya enviado hace más de un año.
+    /// </summary>
+    [Fact]
+    public async Task No_se_purga_el_CV_de_quien_tuvo_actividad_reciente()
+    {
+        var ruta = await GuardarCvAsync();
+        var respuestaId = await ConCvVencidoAsync(ruta, diasDeAntiguedad: 400);
+        await SinProcesoVivoAsync(diasDeAntiguedad: 10);
+
+        var vencidas = await _entorno.Formularios.ListarCvsPorPurgarAsync(diasRetencion: 365, maximo: 50);
+
+        Assert.DoesNotContain(vencidas, r => r.RespuestaId == respuestaId);
+    }
+
     [Fact]
     public async Task La_purga_deja_constancia_en_la_auditoria()
     {
         var ruta = await GuardarCvAsync();
         var respuestaId = await ConCvVencidoAsync(ruta, diasDeAntiguedad: 400);
+        await SinProcesoVivoAsync(diasDeAntiguedad: 400);
 
         await _entorno.Formularios.PurgarCvAsync(respuestaId);
 

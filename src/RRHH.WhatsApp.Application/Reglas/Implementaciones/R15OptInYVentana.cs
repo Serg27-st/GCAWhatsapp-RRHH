@@ -39,14 +39,7 @@ public sealed class R15OptInYVentana : IReglaNegocio
         // Con la ventana cerrada el envio sigue siendo posible, pero solo como plantilla aprobada.
         // Quien orquesta el envio consulta esta senal antes de armar el mensaje.
         if (!ctx.VentanaServicioAbierta)
-        {
-            return Task.FromResult(ResultadoRegla.Con(
-                new PublicarEvento("EnvioRequierePlantilla", new
-                {
-                    ctx.Conversacion!.ConversacionId,
-                    UltimoMensajeEntrante = ctx.Conversacion.FechaUltimoMensajeEntrante
-                })));
-        }
+            return Task.FromResult(ResultadoRegla.Con(new RequierePlantilla()));
 
         return Task.FromResult(ResultadoRegla.SinAccion);
     }

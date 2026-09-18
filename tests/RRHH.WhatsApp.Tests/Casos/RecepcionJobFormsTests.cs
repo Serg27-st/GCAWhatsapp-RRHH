@@ -89,12 +89,6 @@ public class RecepcionJobFormsTests : IDisposable
     [Fact]
     public async Task Se_confirma_por_WhatsApp_que_el_formulario_llego()
     {
-        var plantilla = await _entorno.Db.Plantillas
-            .FirstAsync(p => p.Clave == ClavesPlantilla.ConfirmacionJobForms);
-
-        plantilla.Activa = true;
-        await _entorno.Db.SaveChangesAsync();
-
         var token = await ConEnlaceEnviadoAsync();
 
         await _entorno.RecepcionFormulario.ProcesarAsync(Envio(token));
@@ -102,9 +96,11 @@ public class RecepcionJobFormsTests : IDisposable
         // La confirmacion no sale del request: viaja por la outbox, como el resto del flujo.
         await _entorno.ConsumirOutboxAsync();
 
+        // COR-03 (P1): completar el formulario pasa dentro de la ventana de 24h, asi que la
+        // confirmacion sale en texto. Con plantilla —las seis nacen inactivas— no salia nada (C3).
         var confirmacion = Assert.Single(
             _entorno.Proveedor.Enviados,
-            e => e.Tipo == "plantilla" && e.Detalle == ClavesPlantilla.ConfirmacionJobForms);
+            e => e.Tipo == "texto" && e.Detalle.Contains("Recibimos tu ficha"));
 
         Assert.NotNull(confirmacion);
     }

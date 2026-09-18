@@ -13,7 +13,7 @@ La fuente de requisitos sigue siendo `Dossier_Maestro_WhatsApp_RRHH_v2.docx`.
 | D4 | Modelo de datos | **Agregar tabla `Postulaciones`** | El kanban pasa a ser por vacante, no por cuenta |
 | D5 | Despliegue | **On-premise** (IIS + SQL Server de la empresa) | CVs en recurso compartido, secretos en variables de entorno |
 | D6 | Autenticación | **JWT emitido por el propio sistema**, sin Active Directory / SSO | `IAutenticacionService` queda como costura para integrar un directorio el día que exista (ver V20) |
-| D7 | Criterio de atención | **Resoluciones A1–A15 con criterio de atención preferente al postulante** (principios P1–P4) | Prevalecen sobre las dudas originales. Detalle en [`auditoria/01-arquitectura-funcional.md`](auditoria/01-arquitectura-funcional.md) §5; se reflejan en V30, V33 y V36 |
+| D7 | Criterio de atención | **Resoluciones A1–A15 con criterio de atención preferente al postulante** (principios P1–P4) | Prevalecen sobre las dudas originales. Detalle en [`auditoria/01-arquitectura-funcional.md`](auditoria/01-arquitectura-funcional.md) §5; se reflejan en V30, V33, V36 y V37. A2 (reingreso) es el estado `EstadoPostulacion.Reingreso`, que marca el analista y cuenta como proceso vivo: no se archiva, no se le repregunta la empresa y sus mensajes van directo a su analista |
 
 ## Desviaciones respecto del dossier
 
@@ -38,9 +38,11 @@ tablero kanban es por vacante (Sección 7 y Regla 13), pero `Conversaciones` no 
 Así la Regla 6 se cumple de verdad: dos postulaciones independientes, cada una visible solo para
 su analista, sobre un único hilo de WhatsApp.
 
-**Pendiente de definir con RRHH:** cómo se presenta ese hilo único al postulante cuando dos
-analistas de cuentas distintas le escriben. La recomendación es prefijar el mensaje saliente con
-el nombre de la cuenta/vacante y que el bot repregunte la empresa cuando haya ambigüedad.
+**Resuelto (A3, T4.07 y T4.08):** el hilo único se presenta con el nombre de la empresa a la vista.
+Si la persona escribe sin decir por cuál, el bot le ofrece sus procesos vivos por nombre y la salida
+«Otra empresa» (Regla 6); y lo que el analista le responde en texto lleva el prefijo
+`[Cuenta · Vacante]` mientras tenga procesos en más de una cuenta. El prefijo no va en las
+plantillas: su contenido está aprobado por Meta.
 
 ### V2 — `Conversaciones.PostulanteId` es nullable
 
@@ -325,9 +327,11 @@ no aceptó.
 **El origen también se entera:** aceptar y rechazar le llegan por el canal en vivo. Rechazar deja
 el hilo con él, y sin el aviso no sabría que le toca derivarlo a otro.
 
-**Queda abierto:** una transferencia que el destino nunca contesta sigue bloqueando cualquier otra
-para esa conversación. Hacerla vencer, o dejar que el origen la retire, depende del criterio de
-urgencia que RRHH todavía no confirmó (Sección 12 del dossier).
+**Resuelto (A1, T4.04 y T4.05):** una transferencia no urgente **vence** a las
+`transferencia.horas_vencimiento` hábiles sin respuesta —vuelve a quien la envió y los dos se
+enteran—, y quien la envió puede **retirarla** antes desde «Transferencias que enviaste». Las dos
+cosas desbloquean la conversación para una transferencia nueva. Las urgentes no vencen: cambian de
+manos en el acto.
 
 ### V22 — La Regla 4 separa ver de actuar, y se aplica en la frontera HTTP
 
@@ -655,6 +659,11 @@ necesita. Una fila por ocurrencia enterraría lo único que importa: que la plan
 `plantilla:cierre_cortesia`), no a la persona afectada, y el detalle tampoco lleva teléfono, nombre ni
 DNI. Así la alerta no entra en la purga ni en la anonimización de la Regla 17.
 
+**Quién las mira (T5.08).** `MenuTruncado` dejó de existir cuando el menú pasó a paginarse. Las que
+quedan se ven en `/configuracion`, con el contador de veces que volvió a pasar y el botón
+«Resolver»; el menú lateral muestra cuántas hay abiertas, porque una tabla que nadie abre es lo
+mismo que no tenerla. Verlas es de Jefatura y Sistemas; resolverlas, de Sistemas.
+
 Especificación en `auditoria/03-analisis-brechas.md` §ARQ-09.
 
 ### V33 — Los adjuntos del postulante se descargan, se escanean y tienen retención
@@ -673,10 +682,31 @@ muestra.
 **Retención:** un adjunto es un dato personal de la misma naturaleza que el CV, así que entra en la
 purga de la Regla 17 (`datos.retencion_adjuntos_dias`) y en la anonimización por DNI.
 
-**Lo que queda por fijar:** desde cuándo cuenta el plazo. A5 (D7) cuenta la retención del CV desde la
-última actividad del postulante, para no borrar el de alguien en proceso; la especificación de
-adjuntos no lo dice, y su índice por fecha de recepción sugiere contar desde ahí. Un CV llegado por
-WhatsApp no debería vencer antes que uno llegado por el formulario: debe seguir el criterio de A5.
+**Desde cuándo cuenta el plazo (fijado en T5.05):** desde la **última actividad de la persona** —la
+del hilo y la de sus postulaciones—, no desde que llegó el archivo. A5 (D7) ya lo cuenta así para el
+CV del formulario, y un CV llegado por WhatsApp no puede vencer antes que ese. Tampoco se purga nada
+de quien tiene una postulación `EnProceso`, `Reingreso` o `Contratado`. El índice por fecha de
+recepción sigue sirviendo: ordena la cola de descarga, que es otra cosa.
+
+**Cómo quedó (T5.02–T5.04):**
+
+- El almacenamiento del CV y el de los adjuntos comparten una base (`AlmacenamientoArchivosLocal`),
+  para que el control no se duplique. El adjunto distingue el rechazo en firme
+  (`ArchivoRechazadoException`: antivirus, tope, tipo) de un fallo reintentable (antivirus caído,
+  recurso compartido no disponible).
+- La descarga devuelve un resultado clasificado, como `ResultadoEnvio`, pero **sin fallo ambiguo**:
+  pedir un archivo no cambia nada del lado del proveedor, así que repetirlo no duplica nada.
+- Los intentos y la espera son parámetros de operación (`Worker:*`), no de negocio: dicen cuánto se
+  insiste contra el proveedor, no qué pasa con el postulante. La tabla suma `IntentosDescarga` y
+  `ProximoIntentoUtc`, que la especificación no traía, por la misma razón que `Mensajes`.
+- 360dialog baja el archivo pidiendo la ruta del CDN de Meta a su propio host, con su clave: así lo
+  indica su documentación vigente, que difiere del `GET media/{id}` de la especificación.
+- **El archivo no tiene URL propia para el navegador (T5.05).** La especificación proponía un
+  endpoint proxy en el Frontend, o un token de descarga de un solo uso. Ninguno hacía falta: el token
+  del analista vive solo en el circuito de Blazor —no se persiste (V20)—, así que un endpoint HTTP
+  del Frontend no podría usarlo, y un token en la URL dejaría el archivo de una persona en el
+  historial del navegador. El circuito pide el archivo a la Api con su token y se lo entrega al
+  navegador por `DotNetStreamReference`, que es la forma que documenta Blazor Server para esto.
 
 Especificación en `auditoria/03-analisis-brechas.md` §ARQ-10.
 
@@ -752,6 +782,37 @@ despachador revalida al enviar (V29), un texto encolado con la ventana abierta q
 salir queda fallido en vez de salir fuera de norma. Especificación en
 `auditoria/03-analisis-brechas.md` §COR-03.
 
+### V37 — El barrido por tiempo pasa por el hilo y por el proceso, con disparadores distintos
+
+**Problema:** lo que vence por silencio es el proceso, no el hilo (COR-14, A14). Una persona puede
+tener una postulación dormida en una cuenta y otra viva en otra, por el mismo hilo (V1). El archivado
+miraba solo la conversación, así que `EstadoPostulacion.Archivada` nunca se asignaba (M6) y una
+postulación abandonada seguía «en proceso» en el tablero y en las métricas. El cierre de cortesía que
+queda pendiente por un descarte fuera de horario (A11) tiene el mismo problema: es de una postulación,
+no del hilo.
+
+La especificación (`03` §FUN-11) proponía reusar `TiempoTranscurrido` con la postulación cargada en el
+contexto. El problema es que las reglas por tiempo del hilo también aplican con ese disparador —el
+escalamiento (Regla 2), la derivación y el plazo de «Sin clasificar» (Regla 19), el vencimiento de
+transferencias (Regla 8)—, y habrían corrido una vez más por cada postulación: un escalamiento o un
+aviso a Jefatura por proceso, en vez de uno por hilo.
+
+**Decisión:** el barrido hace dos pasadas, cada una con su disparador y cada candidata en su propia
+transacción (V28).
+
+- `TiempoTranscurrido`, una evaluación por conversación: Reglas 2 (escalamiento y segundo nivel), 8,
+  9 (seguimiento del formulario), 16 (archivado del hilo) y 19 (derivación y plazo).
+- `TiempoTranscurridoPostulacion`, una por postulación candidata: Regla 12 (cierre de cortesía
+  pendiente) y Regla 16 (archivado del proceso, con aviso previo al analista).
+
+El hilo se archiva aparte y solo cuando ya no le queda ningún proceso vivo ni contratado: primero se
+archiva la postulación y, en la vuelta siguiente, el hilo.
+
+**Consecuencia:** una regla nueva que dependa del tiempo tiene que elegir el disparador según lo que
+mire. Con el del hilo, una regla del proceso se pierde las postulaciones; con el del proceso, una regla
+del hilo se repite por cada una. Especificación en `auditoria/03-analisis-brechas.md` §FUN-11 y
+§COR-14; el desvío quedó anotado en T4.11.
+
 ## Riesgos abiertos
 
 | Riesgo | Detalle | Mitigación |
@@ -763,7 +824,6 @@ salir queda fallido en vez de salir fuera de norma. Especificación en
 | **SQL Server Express** | 10 GB por base y sin SQL Agent. | Suficiente para el volumen actual; los CVs van fuera de la BD y el Worker reemplaza al Agent. Confirmar la instancia de producción. |
 | **Aprobación del WABA** | Es el cuello de botella real del proyecto, no el desarrollo. | Iniciar el trámite desde el día 1 (Sección 10 del dossier). |
 | **Worker de instancia única** | `EventosSistema` no tiene reserva por fila. Dos Workers tomarían el mismo evento y podrían enviar el mismo mensaje dos veces, que es el patrón que causó el bloqueo original. | Candado de SQL Server (V24): una segunda instancia queda en espera. Queda una ventana corta si la activa pierde la conexión. Si el volumen desborda a una instancia, agregar reserva por fila antes de escalar, no después. |
-| **La marca de "reingreso" no existe en el modelo** | Las Reglas 9 y 16 dicen "salvo marca de contratado / descartado / reingreso", pero `EstadoPostulacion` solo tiene `EnProceso`, `Contratado`, `Descartado` y `Archivada`. Hoy las reglas deciden con lo que existe: la 16 no archiva si hay algo en proceso o contratado, y la 9 no repregunta si el analista ya decidió. | **Definido por la resolución A2 (D7):** estado de postulación `Reingreso`, que marca el analista y cuenta como proceso vivo —no se archiva (Regla 16), no se repregunta la empresa (Regla 9) y sus mensajes van directo a su analista—. Se implementa en T2.06; hasta entonces las reglas siguen decidiendo con los estados existentes. |
 | **El CV vive en Google Drive** | Con Google Forms el adjunto queda en Drive y sólo guardamos su enlace. La purga de la Regla 17 limpia la referencia pero no puede borrar el archivo en el origen. | El Worker lo registra en el log cada vez que ocurre, para que quede el rastro del paso manual. Se resuelve solo al migrar el formulario a Razor Pages (D3), donde el CV entra por `IAlmacenamientoCv`. |
 
 ## Convenciones

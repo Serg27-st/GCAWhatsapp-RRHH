@@ -31,7 +31,7 @@ public class SaludWorkerTests : IDisposable
         _db.Database.EnsureCreated();
 
         _latidos = new LatidoServicioService(_db, TimeProvider.System);
-        _chequeo = new ChequeoWorker(_latidos);
+        _chequeo = new ChequeoWorker(_latidos, TimeProvider.System);
     }
 
     private Task<HealthCheckResult> ChequearAsync() =>
@@ -91,6 +91,25 @@ public class SaludWorkerTests : IDisposable
         await LatirTodosAsync(TimeSpan.FromMinutes(15), hace: TimeSpan.FromMinutes(10));
 
         Assert.Equal(HealthStatus.Healthy, (await ChequearAsync()).Status);
+    }
+
+    [Fact]
+    public async Task Sin_el_despachador_de_envios_el_Worker_no_esta_sano()
+    {
+        // V29: desde la cola, el bot no manda nada si este bucle se detiene. Los mensajes quedan
+        // EnCola y nadie se entera hasta que un postulante reclama.
+        await LatirTodosAsync(TimeSpan.FromMinutes(15));
+
+        var despacho = await _db.LatidosServicio
+            .FirstAsync(l => l.Servicio == ServiciosVigilados.DespachoEnvios);
+
+        despacho.FechaUtc = DateTime.UtcNow.AddHours(-1);
+        await _db.SaveChangesAsync();
+
+        var resultado = await ChequearAsync();
+
+        Assert.Equal(HealthStatus.Unhealthy, resultado.Status);
+        Assert.Contains(ServiciosVigilados.DespachoEnvios, resultado.Description);
     }
 
     [Fact]

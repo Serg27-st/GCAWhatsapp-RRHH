@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using RRHH.WhatsApp.Domain.Entidades;
 using RRHH.WhatsApp.Domain.Enums;
@@ -30,9 +29,8 @@ public sealed record ResumenReintentos(int Intentados, int Logrados, int Reprogr
 /// </summary>
 public sealed class ReintentoEnvios(
     IMensajeService mensajes,
-    IConversacionService conversaciones,
-    IPlantillaService plantillas,
-    IWhatsAppProvider proveedor,
+    ValidadorEnvio validador,
+    DespachoEnvios despacho,
     IConfiguracionReglasService configuracion,
     TimeProvider reloj,
     ILogger<ReintentoEnvios> log)
@@ -59,7 +57,9 @@ public sealed class ReintentoEnvios(
         {
             ct.ThrowIfCancellationRequested();
 
-            var motivoBloqueo = await MotivoParaNoReintentarAsync(mensaje, ct);
+            // Revalida la Regla 15 justo antes de reenviar: la ventana pudo cerrarse entre el primer
+            // intento y este, y un texto libre que era legal hace tres horas ahora no lo es.
+            var motivoBloqueo = await validador.MotivoParaNoEnviarAsync(mensaje, ct);
 
             if (motivoBloqueo is not null)
             {
@@ -70,7 +70,8 @@ public sealed class ReintentoEnvios(
                 continue;
             }
 
-            var resultado = await ReenviarAsync(mensaje, ct);
+            // Misma construccion que el despacho: asi tambien se reintentan botones y listas (T1.08).
+            var resultado = await despacho.EnviarSegunTipoAsync(mensaje, ct);
 
             if (resultado.Exito)
             {
@@ -112,76 +113,6 @@ public sealed class ReintentoEnvios(
         }
 
         return new ResumenReintentos(pendientes.Count, logrados, reprogramados, abandonados);
-    }
-
-    /// <summary>
-    /// Revalida la Regla 15 justo antes de reenviar. Es el punto que hace seguro el reintento: la
-    /// ventana de 24h pudo haberse cerrado entre el primer intento y este, y un texto libre que
-    /// era legal hace tres horas ahora no lo es. Devuelve el motivo por el que hay que abandonar,
-    /// o nulo si se puede seguir.
-    /// </summary>
-    private async Task<string?> MotivoParaNoReintentarAsync(Mensaje mensaje, CancellationToken ct)
-    {
-        var conversacion = mensaje.Conversacion
-            ?? await conversaciones.ObtenerPorIdAsync(mensaje.ConversacionId, ct);
-
-        if (conversacion is null)
-            return "La conversacion ya no existe.";
-
-        if (conversacion.FechaOptIn is null)
-            return "Ya no hay opt-in registrado para este numero (Regla 15).";
-
-        // Con plantilla el envio es valido con la ventana cerrada; en texto libre, no.
-        if (mensaje.PlantillaId is null
-            && !await plantillas.ValidarVentana24hAsync(conversacion.ConversacionId, ct))
-        {
-            return "La ventana de 24h se cerro mientras el mensaje esperaba: "
-                 + "reenviarlo como texto libre violaria la Regla 15.";
-        }
-
-        return null;
-    }
-
-    private async Task<ResultadoEnvio> ReenviarAsync(Mensaje mensaje, CancellationToken ct)
-    {
-        var telefono = mensaje.Conversacion?.TelefonoE164
-            ?? (await conversaciones.ObtenerPorIdAsync(mensaje.ConversacionId, ct))?.TelefonoE164;
-
-        if (telefono is null)
-            return ResultadoEnvio.Permanente("La conversacion ya no existe.");
-
-        if (mensaje.PlantillaId is null)
-            return await proveedor.EnviarTextoAsync(telefono, mensaje.Contenido, ct);
-
-        var plantilla = mensaje.Plantilla
-            ?? await plantillas.ObtenerPlantillaParaEventoAsync(mensaje.Plantilla?.Clave ?? string.Empty, ct);
-
-        // Nula significa que la plantilla se desactivo o dejo de estar aprobada desde el primer
-        // intento. Reintentarla es justamente lo que provoca sanciones sobre la linea.
-        if (plantilla is null || !plantilla.Activa)
-            return ResultadoEnvio.Permanente("La plantilla ya no esta activa o aprobada en Meta.");
-
-        return await proveedor.EnviarPlantillaAsync(telefono, plantilla, LeerParametros(mensaje), ct);
-    }
-
-    /// <summary>
-    /// Los parametros se guardan al enviar porque el contenido almacenado conserva los {{n}} sin
-    /// reemplazar: sin ellos no se podria rearmar la plantilla.
-    /// </summary>
-    private IReadOnlyList<string> LeerParametros(Mensaje mensaje)
-    {
-        if (string.IsNullOrWhiteSpace(mensaje.ParametrosPlantillaJson))
-            return [];
-
-        try
-        {
-            return JsonSerializer.Deserialize<List<string>>(mensaje.ParametrosPlantillaJson) ?? [];
-        }
-        catch (JsonException ex)
-        {
-            log.LogError(ex, "No se pudieron leer los parametros del mensaje {MensajeId}.", mensaje.MensajeId);
-            return [];
-        }
     }
 
     /// <summary>

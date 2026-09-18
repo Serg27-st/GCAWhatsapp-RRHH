@@ -44,6 +44,10 @@ public static class RegistroDependencias
         servicios.Configure<OpcionesAntivirus>(configuracion.GetSection(OpcionesAntivirus.Seccion));
         servicios.AddScoped<IAlmacenamientoCv, AlmacenamientoCvLocal>();
 
+        // V33: los archivos que llegan por WhatsApp pasan por el mismo antivirus que el CV.
+        servicios.Configure<OpcionesAdjuntos>(configuracion.GetSection(OpcionesAdjuntos.Seccion));
+        servicios.AddScoped<IAlmacenamientoAdjuntos, AlmacenamientoAdjuntosLocal>();
+
         // Seccion 9.6.1: el CV pasa por el antivirus antes de guardarse. Apagarlo es una decision
         // explicita —el escaner nulo avisa en cada archivo— y no un descuido de configuracion.
         var escanearCv = configuracion
@@ -61,6 +65,7 @@ public static class RegistroDependencias
         servicios.AddScoped<IMensajeService, MensajeService>();
         servicios.AddScoped<IEventoSistemaService, EventoSistemaService>();
         servicios.AddScoped<IConfiguracionReglasService, ConfiguracionReglasService>();
+        servicios.AddScoped<IAlertaOperativaService, AlertaOperativaService>();
         servicios.AddScoped<ICuentaService, CuentaService>();
         servicios.AddScoped<IPlantillaService, PlantillaService>();
         servicios.AddScoped<IHorarioAtencionService, HorarioAtencionService>();
@@ -84,12 +89,20 @@ public static class RegistroDependencias
         servicios.AddScoped<EjecutorAcciones>();
         servicios.AddScoped<EvaluadorReglas>();
         servicios.AddScoped<RecepcionWebhook>();
+
+        // V29: decidir y enviar van separados. El despachador es lo unico que manda en nombre del
+        // bot, y el validador revalida la Regla 15 al salir, tambien en el reintento.
+        servicios.AddScoped<ValidadorEnvio>();
+        servicios.AddScoped<DespachoEnvios>();
         servicios.AddScoped<ReintentoEnvios>();
         servicios.AddScoped<RecepcionJobForms>();
         servicios.AddScoped<EnvioAnalista>();
         servicios.AddScoped<AccionesBandeja>();
         servicios.AddScoped<ProcesadorOutbox>();
         servicios.AddScoped<BarridoTiempo>();
+        servicios.AddScoped<AvisoRetornoAusencia>();
+        servicios.AddScoped<DescargaAdjuntos>();
+        servicios.AddScoped<PurgaAdjuntos>();
 
         return servicios;
     }
@@ -101,11 +114,18 @@ public static class RegistroDependencias
     public static IServiceCollection AgregarReglas(this IServiceCollection servicios)
     {
         servicios.AddScoped<IReglaNegocio, R15OptInYVentana>();
+        servicios.AddScoped<IReglaNegocio, R16Reactivacion>();
         servicios.AddScoped<IReglaNegocio, R19FallbackMenu>();
+        servicios.AddScoped<IReglaNegocio, R19DerivacionPorSilencio>();
+        servicios.AddScoped<IReglaNegocio, R19AvisoPendiente>();
+        servicios.AddScoped<IReglaNegocio, R06Desambiguacion>();
         servicios.AddScoped<IReglaNegocio, R09RepreguntaEmpresa>();
         servicios.AddScoped<IReglaNegocio, R14Ausencias>();
+        servicios.AddScoped<IReglaNegocio, R08VencimientoTransferencia>();
         servicios.AddScoped<IReglaNegocio, R16Archivado>();
+        servicios.AddScoped<IReglaNegocio, R16ArchivadoConversacion>();
         servicios.AddScoped<IReglaNegocio, R02Escalamiento>();
+        servicios.AddScoped<IReglaNegocio, R02SegundoNivel>();
         servicios.AddScoped<IReglaNegocio, R01Asignacion>();
         servicios.AddScoped<IReglaNegocio, R20VacanteCerrada>();
         servicios.AddScoped<IReglaNegocio, R09EnvioLink>();

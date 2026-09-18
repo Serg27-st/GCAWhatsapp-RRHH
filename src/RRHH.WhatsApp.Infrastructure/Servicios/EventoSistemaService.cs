@@ -61,6 +61,69 @@ public sealed class EventoSistemaService(RrhhDbContext db, TimeProvider reloj, I
         await db.SaveChangesAsync(ct);
     }
 
+    public async Task<int> PurgarProcesadosAsync(int dias, int tamanoLote, CancellationToken ct = default)
+    {
+        var limite = reloj.GetUtcNow().UtcDateTime.AddDays(-dias);
+        var borrados = 0;
+
+        while (!ct.IsCancellationRequested)
+        {
+            // Por fecha de procesado y no de creacion: lo que vence es el rastro de algo ya resuelto.
+            var lote = await db.EventosSistema
+                .Where(e => e.Estado == EstadoEvento.Procesado && e.FechaProcesado <= limite)
+                .OrderBy(e => e.EventoId)
+                .Take(tamanoLote)
+                .ExecuteDeleteAsync(ct);
+
+            borrados += lote;
+
+            // Lote incompleto: no queda nada mas viejo que el limite.
+            if (lote < tamanoLote)
+                break;
+        }
+
+        if (borrados > 0)
+            log.LogInformation("Purga de la outbox: {Borrados} evento(s) procesados eliminados.", borrados);
+
+        return borrados;
+    }
+
+    public async Task<int> AnonimizarPorConversacionAsync(
+        IReadOnlyCollection<int> conversacionIds, CancellationToken ct = default)
+    {
+        var vaciados = 0;
+
+        foreach (var id in conversacionIds)
+        {
+            // El payload es JSON compacto, con la propiedad en camelCase o en PascalCase segun quien lo
+            // haya escrito. Se busca con el cierre —coma o llave— porque sin el, la conversacion 5
+            // tambien casaria con la 51 y se borraria el rastro de otra persona.
+            var camelCierre = $"\"conversacionId\":{id}}}";
+            var camelComa = $"\"conversacionId\":{id},";
+            var pascalCierre = $"\"ConversacionId\":{id}}}";
+            var pascalComa = $"\"ConversacionId\":{id},";
+
+            // Lo pendiente no se toca: es de hace segundos, su payload ya son solo identificadores
+            // (ARQ-13) y vaciarlo dejaria al consumidor con un evento ilegible que no puede procesar ni
+            // descartar. Lo que se limpia es el rastro de lo que ya no se va a procesar.
+            var eventos = await db.EventosSistema
+                .Where(e => e.Estado != EstadoEvento.Pendiente)
+                .Where(e => e.Payload.Contains(camelCierre) || e.Payload.Contains(camelComa)
+                         || e.Payload.Contains(pascalCierre) || e.Payload.Contains(pascalComa))
+                .ToListAsync(ct);
+
+            foreach (var evento in eventos)
+                evento.Payload = "{}";
+
+            vaciados += eventos.Count;
+        }
+
+        if (vaciados > 0)
+            await db.SaveChangesAsync(ct);
+
+        return vaciados;
+    }
+
     public async Task MarcarFallidoAsync(long eventoId, string error, int reintentosMaximos, CancellationToken ct = default)
     {
         var evento = await db.EventosSistema.FirstAsync(e => e.EventoId == eventoId, ct);

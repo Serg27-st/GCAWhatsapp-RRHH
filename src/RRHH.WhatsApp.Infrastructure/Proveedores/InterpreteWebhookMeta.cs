@@ -42,7 +42,10 @@ public static class InterpreteWebhookMeta
                 if (mensaje.Id is null || mensaje.De is null)
                     continue;
 
-                var (contenido, idBoton) = ExtraerContenido(mensaje);
+                var medio = ExtraerMedio(mensaje);
+                var (contenido, idBoton) = medio is null
+                    ? ExtraerContenido(mensaje)
+                    : (ContenidoDeMedio(medio), null);
 
                 resultado.Add(new MensajeEntranteDto(
                     ProviderMessageId: mensaje.Id,
@@ -50,7 +53,8 @@ public static class InterpreteWebhookMeta
                     NombrePerfil: nombres.GetValueOrDefault(mensaje.De),
                     Contenido: contenido,
                     IdBotonPulsado: idBoton,
-                    FechaUtc: LeerTimestamp(mensaje.Timestamp, ahoraUtc)));
+                    FechaUtc: LeerTimestamp(mensaje.Timestamp, ahoraUtc),
+                    Medio: medio));
             }
         }
 
@@ -126,9 +130,58 @@ public static class InterpreteWebhookMeta
             // Respuesta rapida de una plantilla: el identificador viaja en payload, no en id.
             "button" => (mensaje.Boton?.Texto ?? string.Empty, mensaje.Boton?.Payload),
 
-            // Adjuntos y demas: se deja constancia del tipo para que el analista lo vea en el chat.
+            // Ubicaciones, contactos, reacciones y lo que Meta agregue: se deja constancia del tipo
+            // para que el analista lo vea en el chat. Los archivos no llegan aca (ExtraerMedio).
             _ => ($"[{mensaje.Tipo ?? "desconocido"}]", null)
         };
+
+    /// <summary>
+    /// ARQ-10 (M3): los archivos antes quedaban como <c>[document]</c> y se perdian. Sin id no hay nada
+    /// que pedirle al proveedor, y se trata como cualquier otro tipo desconocido.
+    /// </summary>
+    private static MedioEntranteDto? ExtraerMedio(WebhookMensaje mensaje)
+    {
+        var medio = mensaje.Tipo switch
+        {
+            "image" => mensaje.Imagen,
+            "document" => mensaje.Documento,
+            "audio" => mensaje.Audio,
+            "video" => mensaje.Video,
+            "sticker" => mensaje.Sticker,
+            _ => null
+        };
+
+        if (medio?.Id is not { Length: > 0 } id)
+            return null;
+
+        return new MedioEntranteDto(
+            ProveedorMedioId: id,
+            Tipo: mensaje.Tipo!,
+            // Meta siempre lo manda; sin el, el almacenamiento decide por el contenido real.
+            MimeType: medio.MimeType ?? "application/octet-stream",
+            NombreArchivo: string.IsNullOrWhiteSpace(medio.NombreArchivo) ? null : medio.NombreArchivo,
+            Leyenda: string.IsNullOrWhiteSpace(medio.Leyenda) ? null : medio.Leyenda);
+    }
+
+    /// <summary>
+    /// La leyenda es lo que la persona escribio, y es lo que tienen que leer las reglas: el codigo del
+    /// aviso junto a la foto del DNI lleva al formulario igual que escrito solo (FUN-02). Sin leyenda,
+    /// el tipo en palabras del analista.
+    /// </summary>
+    private static string ContenidoDeMedio(MedioEntranteDto medio)
+    {
+        if (medio.Leyenda is { } leyenda)
+            return leyenda;
+
+        var tipo = medio.Tipo switch
+        {
+            "image" => "imagen",
+            "document" => "documento",
+            _ => medio.Tipo
+        };
+
+        return medio.NombreArchivo is { } nombre ? $"[{tipo}: {nombre}]" : $"[{tipo}]";
+    }
 
     private static DateTime LeerTimestamp(string? unixSegundos, DateTime ahoraUtc) =>
         long.TryParse(unixSegundos, out var segundos)

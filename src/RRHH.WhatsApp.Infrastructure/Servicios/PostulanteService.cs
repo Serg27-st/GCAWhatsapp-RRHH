@@ -13,6 +13,12 @@ namespace RRHH.WhatsApp.Infrastructure.Servicios;
 public sealed class PostulanteService(
     RrhhDbContext db,
     IAlmacenamientoCv almacenamiento,
+    IAlmacenamientoAdjuntos adjuntos,
+    IConversacionService conversaciones,
+    IMensajeService mensajes,
+    IEventoSistemaService eventos,
+    IAuditoriaService auditoria,
+    IUnidadTrabajo unidad,
     TimeProvider reloj,
     ILogger<PostulanteService> log) : IPostulanteService
 {
@@ -74,6 +80,17 @@ public sealed class PostulanteService(
             .ToListAsync(ct);
     }
 
+    /// <summary>
+    /// FUN-16 (AL6): un pedido de eliminacion tiene que alcanzar todo lo que dice quien es la persona
+    /// —su ficha, sus mensajes, sus archivos, el rastro en la outbox y el detalle de la auditoria—, y
+    /// dejar lo que sostiene las metricas de la Regla 18.
+    /// <para>
+    /// Todo en una transaccion (V28): a medias quedaria una persona anonimizada con sus mensajes
+    /// intactos, que es peor que no haber empezado. Los archivos se borran dentro, como la purga del CV:
+    /// si algo se deshace, lo que queda es una fila que apunta a un archivo que ya no esta, y eso la
+    /// purga lo tolera.
+    /// </para>
+    /// </summary>
     public async Task AnonimizarDatosAsync(string dni, string motivo, CancellationToken ct = default)
     {
         var postulante = await db.Postulantes.FirstOrDefaultAsync(p => p.Dni == dni, ct)
@@ -83,37 +100,51 @@ public sealed class PostulanteService(
 
         var id = postulante.PostulanteId;
 
-        var respuestas = await db.JobFormsRespuestas.Where(r => r.PostulanteId == id).ToListAsync(ct);
-
-        foreach (var respuesta in respuestas)
+        await unidad.EjecutarAsync(async c =>
         {
-            if (respuesta.CvUrl is { } ruta)
-                await EliminarCvAsync(ruta, ct);
+            var respuestas = await db.JobFormsRespuestas.Where(r => r.PostulanteId == id).ToListAsync(c);
 
-            respuesta.CvUrl = null;
+            foreach (var respuesta in respuestas)
+            {
+                if (respuesta.CvUrl is { } ruta)
+                    await EliminarCvAsync(ruta, c);
 
-            // Los campos del formulario tambien son datos personales: quedan vacios, no borrados,
-            // para no romper la fila que sostiene la trazabilidad del consentimiento.
-            respuesta.DatosJson = "{}";
-        }
+                respuesta.CvUrl = null;
 
-        // Se anonimiza en vez de eliminar filas: borrar al postulante se llevaria por delante sus
-        // postulaciones, y con ellas las metricas historicas de la Regla 18.
-        postulante.Dni = $"ANON-{id}";
-        postulante.NombreCompleto = null;
-        postulante.TelefonoUltimo = null;
-        postulante.Email = null;
+                // Los campos del formulario tambien son datos personales: quedan vacios, no borrados,
+                // para no romper la fila que sostiene la trazabilidad del consentimiento.
+                respuesta.DatosJson = "{}";
+            }
 
-        db.Auditorias.Add(new Auditoria
-        {
-            EntidadTipo = nameof(Postulante),
-            EntidadId = id.ToString(),
-            Accion = "AnonimizacionDatos",
-            Detalle = motivo,
-            Fecha = reloj.GetUtcNow().UtcDateTime
-        });
+            // El hilo, sus mensajes y sus archivos. Cada servicio toca sus tablas (V6).
+            var hilos = await conversaciones.AnonimizarPorPostulanteAsync(id, c);
 
-        await db.SaveChangesAsync(ct);
+            foreach (var ruta in await mensajes.AnonimizarPorConversacionAsync(hilos, c))
+                await adjuntos.EliminarAsync(ruta, c);
+
+            await eventos.AnonimizarPorConversacionAsync(hilos, c);
+            await auditoria.AnonimizarDetallesAsync(hilos, id, c);
+
+            // Se anonimiza en vez de eliminar filas: borrar al postulante se llevaria por delante sus
+            // postulaciones, y con ellas las metricas historicas de la Regla 18.
+            postulante.Dni = $"ANON-{id}";
+            postulante.NombreCompleto = null;
+            postulante.TelefonoUltimo = null;
+            postulante.Email = null;
+
+            // Despues de vaciar los detalles: este registro es el rastro del pedido, y su motivo tiene
+            // que quedar legible para quien audite.
+            db.Auditorias.Add(new Auditoria
+            {
+                EntidadTipo = nameof(Postulante),
+                EntidadId = id.ToString(),
+                Accion = "AnonimizacionDatos",
+                Detalle = motivo,
+                Fecha = reloj.GetUtcNow().UtcDateTime
+            });
+
+            await db.SaveChangesAsync(c);
+        }, ct);
 
         log.LogInformation(
             "Datos personales del postulante {PostulanteId} anonimizados: {Motivo}", id, motivo);

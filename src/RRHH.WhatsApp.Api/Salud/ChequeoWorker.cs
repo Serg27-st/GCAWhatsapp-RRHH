@@ -12,7 +12,7 @@ namespace RRHH.WhatsApp.Api.Salud;
 /// lo que tenía que pasar. Sin esta comprobación nadie se entera hasta que un postulante reclama.
 /// </para>
 /// </summary>
-public sealed class ChequeoWorker(ILatidoServicio latidos) : IHealthCheck
+public sealed class ChequeoWorker(ILatidoServicio latidos, TimeProvider reloj) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext contexto, CancellationToken ct = default)
@@ -30,7 +30,9 @@ public sealed class ChequeoWorker(ILatidoServicio latidos) : IHealthCheck
             return HealthCheckResult.Unhealthy("No se pudo leer el estado del Worker.", ex);
         }
 
-        var ahora = DateTime.UtcNow;
+        // ARQ-01: el instante sale del reloj inyectable, como en el resto del sistema. Con el del
+        // sistema aca adentro, el umbral de silencio de cada bucle no se podia probar sin esperarlo.
+        var ahora = reloj.GetUtcNow().UtcDateTime;
         var detenidos = new List<string>();
         var datos = new Dictionary<string, object>();
 

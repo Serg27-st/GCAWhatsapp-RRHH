@@ -92,6 +92,25 @@ public sealed class Dialog360Provider(
     public IReadOnlyList<EstadoEntregaDto> InterpretarEstados(string cuerpoCrudo) =>
         InterpreteWebhookMeta.Estados(cuerpoCrudo, reloj.GetUtcNow().UtcDateTime, log);
 
+    /// <summary>
+    /// V33: <c>GET {id}</c> devuelve la misma URL del CDN de Meta, pero con 360dialog no tenemos el
+    /// token de Meta. Su documentacion («Upload, retrieve or delete media») indica pedir esa ruta a su
+    /// propio host, con la clave de siempre.
+    /// </summary>
+    public Task<ResultadoDescarga> DescargarMedioAsync(string proveedorMedioId, CancellationToken ct = default)
+    {
+        if (!_opciones.EstaConfigurado)
+            return Task.FromResult(ResultadoDescarga.Permanente("El proveedor no tiene API key configurada."));
+
+        return DescargaMedioHttp.DescargarAsync(
+            http,
+            Uri.EscapeDataString(proveedorMedioId),
+            url => http.BaseAddress is { } propio ? new Uri(propio, url.PathAndQuery) : null,
+            proveedorMedioId,
+            log,
+            ct);
+    }
+
     // ----------------------------------------------------------------- salida
 
     public Task<ResultadoEnvio> EnviarTextoAsync(
@@ -116,7 +135,6 @@ public sealed class Dialog360Provider(
         string telefonoE164, string texto, string textoBoton,
         IReadOnlyList<BotonRespuesta> opciones, CancellationToken ct = default) =>
         EnviarAsync(CuerposMensaje.Lista(telefonoE164, texto, textoBoton, opciones), ct);
-
 
     private async Task<ResultadoEnvio> EnviarAsync(object cuerpo, CancellationToken ct)
     {
@@ -192,5 +210,4 @@ public sealed class Dialog360Provider(
             return null;
         }
     }
-
 }

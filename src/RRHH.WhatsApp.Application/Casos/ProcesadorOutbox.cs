@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using RRHH.WhatsApp.Application.Reglas;
 using RRHH.WhatsApp.Domain.Entidades;
+using RRHH.WhatsApp.Domain.Interfaces;
 
 namespace RRHH.WhatsApp.Application.Casos;
 
@@ -13,6 +14,8 @@ namespace RRHH.WhatsApp.Application.Casos;
 public sealed class ProcesadorOutbox(
     IFabricaContextoRegla fabrica,
     EvaluadorReglas evaluador,
+    IPostulacionService postulaciones,
+    IConfiguracionReglasService configuracion,
     ILogger<ProcesadorOutbox> log)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -65,7 +68,8 @@ public sealed class ProcesadorOutbox(
         }
 
         var contexto = await fabrica.ParaMensajeEntranteAsync(
-            payload.ConversacionId, payload.IdBotonPulsado, evento.CorrelationId, ct);
+            payload.ConversacionId, payload.MensajeId, payload.IdBotonPulsado,
+            payload.FechaActividadAnterior, evento.CorrelationId, ClaveDe(evento), ct);
 
         var ejecutadas = await evaluador.EvaluarYEjecutarAsync(contexto, ct);
 
@@ -87,7 +91,7 @@ public sealed class ProcesadorOutbox(
         }
 
         var contexto = await fabrica.ParaJobFormsCompletadoAsync(
-            payload.ConversacionId, payload.HcId, evento.CorrelationId, ct);
+            payload.ConversacionId, payload.HcId, evento.CorrelationId, ClaveDe(evento), ct);
 
         var ejecutadas = await evaluador.EvaluarYEjecutarAsync(contexto, ct);
 
@@ -107,8 +111,16 @@ public sealed class ProcesadorOutbox(
                 $"El evento {evento.EventoId} no identifica la postulacion. Payload: {evento.Payload}");
         }
 
+        // FUN-10 (A11): lo que el analista pidio se registra antes de evaluar, y en la misma
+        // transaccion que la evaluacion: si algo falla despues, el pedido no queda escrito a medias.
+        await postulaciones.MarcarCierrePendienteAsync(
+            payload.PostulacionId,
+            payload.EnviarCierre,
+            await CierreAutomaticoAsync(ct),
+            ct);
+
         var contexto = await fabrica.ParaCambioEstadoPostulacionAsync(
-            payload.PostulacionId, evento.CorrelationId, ct);
+            payload.PostulacionId, evento.CorrelationId, ClaveDe(evento), ct);
 
         var ejecutadas = await evaluador.EvaluarYEjecutarAsync(contexto, ct);
 
@@ -116,12 +128,40 @@ public sealed class ProcesadorOutbox(
             "Descarte procesado sobre la postulacion {PostulacionId}: {Acciones} accion(es).",
             payload.PostulacionId, ejecutadas);
     }
-    /// <summary>Lo que <see cref="RecepcionWebhook"/> deja en el payload y este procesador necesita.</summary>
-    private sealed record PayloadMensajeEntrante(int ConversacionId, string? IdBotonPulsado);
+
+    /// <summary>
+    /// A11: la operacion entera puede apagar el cierre automatico desde la configuracion. Por defecto
+    /// sale: es lo que el dossier pide para que nadie quede sin respuesta tras un descarte.
+    /// </summary>
+    private async Task<bool> CierreAutomaticoAsync(CancellationToken ct)
+    {
+        var config = await configuracion.ObtenerTodasAsync(ct);
+
+        return !config.TryGetValue(ClavesConfiguracion.CierreAutomatico, out var valor)
+            || !bool.TryParse(valor, out var automatico)
+            || automatico;
+    }
+
+    /// <summary>
+    /// V29: la identidad del evento es la base de las claves de envio. Si el evento se reprocesa
+    /// —fallo algo despues de encolar—, las reglas vuelven a decidir lo mismo con las mismas claves y
+    /// la cola no acepta el mensaje repetido.
+    /// </summary>
+    private static string ClaveDe(EventoSistema evento) => $"evt:{evento.EventoId}";
+
+    /// <summary>
+    /// Lo que <see cref="RecepcionWebhook"/> deja en el payload y este procesador necesita. Son ids y una
+    /// fecha: el contenido del mensaje lo relee la fabrica de la tabla (ARQ-13).
+    /// </summary>
+    private sealed record PayloadMensajeEntrante(
+        int ConversacionId, long MensajeId, string? IdBotonPulsado, DateTime? FechaActividadAnterior);
 
     /// <summary>Lo que <see cref="RecepcionJobForms"/> deja en el payload.</summary>
     private sealed record PayloadJobFormsCompletado(int ConversacionId, int HcId);
 
-    /// <summary>Lo que <see cref="AccionesBandeja"/> deja en el payload.</summary>
-    private sealed record PayloadPostulacionDescartada(int PostulacionId);
+    /// <summary>
+    /// Lo que <see cref="AccionesBandeja"/> deja en el payload. <c>EnviarCierre</c> es lo que el
+    /// analista marco en el dialogo de descarte (FUN-10, A11).
+    /// </summary>
+    private sealed record PayloadPostulacionDescartada(int PostulacionId, bool EnviarCierre = true);
 }

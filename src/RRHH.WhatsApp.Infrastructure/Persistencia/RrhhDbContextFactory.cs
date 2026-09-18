@@ -17,8 +17,13 @@ public class RrhhDbContextFactory : IDesignTimeDbContextFactory<RrhhDbContext>
     {
         var cadena = Environment.GetEnvironmentVariable("RRHH_CONNECTIONSTRING") ?? CadenaPorDefecto;
 
+        // Tiempo de espera amplio solo para las herramientas: una migracion con migracion de datos sobre
+        // un SQL Express con poca memoria supera los 30 s por defecto, y un tiempo de espera a mitad
+        // obliga a revertir y reaplicar.
         var opciones = new DbContextOptionsBuilder<RrhhDbContext>()
-            .UseSqlServer(cadena, sql => sql.MigrationsAssembly(typeof(RrhhDbContextFactory).Assembly.FullName))
+            .UseSqlServer(cadena, sql => sql
+                .MigrationsAssembly(typeof(RrhhDbContextFactory).Assembly.FullName)
+                .CommandTimeout(300))
             .Options;
 
         return new RrhhDbContext(opciones);

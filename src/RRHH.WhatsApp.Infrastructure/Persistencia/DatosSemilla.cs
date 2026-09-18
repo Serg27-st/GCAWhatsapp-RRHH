@@ -20,8 +20,8 @@ public static class DatosSemilla
             new EtapaKanban { EtapaId = 1, Nombre = "Postulante nuevo", Orden = 1, EsFinal = false },
             new EtapaKanban { EtapaId = 2, Nombre = "En revision", Orden = 2, EsFinal = false },
             new EtapaKanban { EtapaId = 3, Nombre = "Entrevista", Orden = 3, EsFinal = false },
-            new EtapaKanban { EtapaId = 4, Nombre = "Contratado", Orden = 4, EsFinal = true },
-            new EtapaKanban { EtapaId = 5, Nombre = "Descartado", Orden = 5, EsFinal = true });
+            new EtapaKanban { EtapaId = 4, Nombre = "Contratado", Orden = 4, EsFinal = true, EstadoResultante = EstadoPostulacion.Contratado },
+            new EtapaKanban { EtapaId = 5, Nombre = "Descartado", Orden = 5, EsFinal = true, EstadoResultante = EstadoPostulacion.Descartado });
 
         modelo.Entity<ConfiguracionRegla>().HasData(
             Config(ClavesConfiguracion.EscalamientoHoras, "2",
@@ -41,13 +41,31 @@ public static class DatosSemilla
             Config(ClavesConfiguracion.VersionAvisoPrivacidad, "2026-08-v1",
                 "Regla 17: version del aviso de privacidad vigente, que se sella en cada respuesta de JobForms."),
             Config(ClavesConfiguracion.EnvioMaximoPorSegundo, "10",
-                "Seccion 9.6.4: tope de velocidad de envio saliente hacia Meta, para no repetir el patron que causo el bloqueo."),
+                "Seccion 9.6.4: tope de velocidad de envio saliente hacia Meta, por proceso emisor, para no repetir el patron que causo el bloqueo."),
             Config(ClavesConfiguracion.ReintentosMaximosEvento, "5",
                 "Seccion 9.6.2: intentos de procesamiento de un evento de la outbox antes de marcarlo como fallido."),
             Config(ClavesConfiguracion.EnvioReintentosMaximos, "4",
                 "Intentos de un saliente rechazado por causa transitoria antes de darlo por perdido."),
             Config(ClavesConfiguracion.EnvioReintentoBaseSegundos, "60",
-                "Base del retroceso exponencial entre reintentos de envio: 1m, 2m, 4m."));
+                "Base del retroceso exponencial entre reintentos de envio: 1m, 2m, 4m."),
+            Config(ClavesConfiguracion.EscalamientoHorasSegundoNivel, "2",
+                "Regla 2 (A9): horas habiles desde el escalamiento sin respuesta del respaldo antes de avisar a Jefatura."),
+            Config(ClavesConfiguracion.ClasificacionHorasAviso, "2",
+                "Regla 19 (P3): horas habiles en Sin clasificar antes de avisar a Jefatura."),
+            Config(ClavesConfiguracion.MenuReintentosPermitidos, "1",
+                "Regla 19: reintentos del menu sin opcion valida antes de derivar a Sin clasificar."),
+            Config(ClavesConfiguracion.MenuHorasDerivacion, "2",
+                "Regla 19 (A12): horas habiles de silencio tras un texto no reconocido antes de derivar a Sin clasificar."),
+            Config(ClavesConfiguracion.TransferenciaHorasVencimiento, "2",
+                "Regla 8 (A1): horas habiles hasta que vence una transferencia no urgente sin respuesta."),
+            Config(ClavesConfiguracion.ArchivadoAvisoDias, "7",
+                "Regla 16 (A14): dias antes del archivado en que se avisa al analista."),
+            Config(ClavesConfiguracion.CierreAutomatico, "true",
+                "Regla 12 (A11): el cierre de cortesia sale por defecto al descartar; el analista puede marcar no enviar."),
+            Config(ClavesConfiguracion.OutboxRetencionDiasProcesados, "30",
+                "Seccion 9.6.2: dias que se conservan los eventos ya procesados de la outbox antes de purgarlos."),
+            Config(ClavesConfiguracion.RetencionAdjuntosDias, "365",
+                "Regla 17: dias de retencion de los adjuntos que llegan por WhatsApp."));
 
         // Catalogo de plantillas. Quedan INACTIVAS a proposito: cada una debe registrarse y
         // aprobarse en Meta, y recien ahi se activa desde la administracion. El texto de abajo es

@@ -17,32 +17,26 @@ public class R09RepreguntaEmpresaTests : IDisposable
     private static Dictionary<string, string> SinCabeceras() => [];
 
     /// <summary>
-    /// Deja el hilo con cuenta ya elegida y un segundo mensaje entrante separado del primero por
-    /// el hueco indicado. Las fechas se fijan a mano porque los payloads de prueba traen un
-    /// timestamp fijo.
+    /// Deja el hilo con cuenta ya elegida y un segundo mensaje entrante tras el hueco indicado. El
+    /// hueco se produce moviendo el reloj (ARQ-12): la inactividad que mira la regla es la que el
+    /// webhook fotografia antes de registrar el mensaje (C1, A13), no la distancia entre dos filas.
     /// </summary>
     private async Task<int> ConHuecoDeAsync(TimeSpan hueco)
     {
         await _entorno.IngresarAsync(PayloadsDePrueba.RespuestaDeBoton);
         await _entorno.ConsumirOutboxAsync();
 
-        await _entorno.IngresarAsync(PayloadsDePrueba.MensajeDeTexto);
+        await _entorno.AvanzarAsync(hueco);
 
-        var mensajes = await _entorno.Db.Mensajes
-            .Where(m => m.Direccion == DireccionMensaje.Entrante)
-            .OrderBy(m => m.MensajeId)
-            .ToListAsync();
+        await _entorno.Recepcion.ProcesarAsync(PayloadsDePrueba.MensajeDeTexto, SinCabeceras());
 
-        Assert.Equal(2, mensajes.Count);
+        var conversacionId = (await _entorno.Db.Conversaciones.FirstAsync()).ConversacionId;
 
-        var ahora = _entorno.Ahora;
+        // El payload de prueba trae un timestamp fijo de 2025, que dejaria la ventana de 24h cerrada
+        // y el menu sin poder salir. La instantanea del hueco ya viajo en el evento.
+        await _entorno.RefrescarActividadAsync(conversacionId);
 
-        mensajes[0].FechaEnvio = ahora - hueco;
-        mensajes[1].FechaEnvio = ahora;
-
-        await _entorno.Db.SaveChangesAsync();
-
-        return (await _entorno.Db.Conversaciones.FirstAsync()).ConversacionId;
+        return conversacionId;
     }
 
     [Fact]
@@ -56,7 +50,8 @@ public class R09RepreguntaEmpresaTests : IDisposable
 
         Assert.Null(conversacion.CuentaContextoId);
         Assert.Null(conversacion.AnalistaAtendiendoId);
-        Assert.Equal(EstadoConversacion.PendienteClasificar, conversacion.Estado);
+        // V30: sin cuenta vuelve al menú del bot, no a «Sin clasificar»: el bot todavía la está atendiendo.
+        Assert.Equal(EstadoConversacion.EnMenuBot, conversacion.Estado);
 
         var menu = Assert.Single(_entorno.Proveedor.Enviados, e => e.Tipo == "botones");
         Assert.Equal(IdsBoton.ParaCuenta(EntornoDeReglas.CuentaId), menu.Detalle);
@@ -76,10 +71,10 @@ public class R09RepreguntaEmpresaTests : IDisposable
     }
 
     [Fact]
-    public async Task Si_el_analista_ya_decidio_no_se_repregunta()
+    public async Task Con_un_proceso_vivo_en_la_cuenta_no_se_repregunta()
     {
-        // El mini-mantenimiento manda: volver a ofrecerle el menu a alguien ya contratado
-        // contradice la decision que el analista acaba de tomar.
+        // COR-07 (AL3): quien esta en proceso sigue con su analista. Limpiarle el contexto se lo
+        // quitaba y mandaba el hilo a la bandeja general.
         var id = await ConHuecoDeAsync(TimeSpan.FromDays(10));
 
         var postulante = new Postulante { Dni = "45678912", FechaRegistro = _entorno.Ahora };
@@ -91,8 +86,8 @@ public class R09RepreguntaEmpresaTests : IDisposable
             PostulanteId = postulante.PostulanteId,
             HcId = 1,
             CuentaId = EntornoDeReglas.CuentaId,
-            EtapaKanbanId = 4,
-            Estado = EstadoPostulacion.Contratado,
+            EtapaKanbanId = 1,
+            Estado = EstadoPostulacion.EnProceso,
             FechaCreacion = _entorno.Ahora,
             FechaUltimaActividad = _entorno.Ahora
         });
@@ -107,6 +102,7 @@ public class R09RepreguntaEmpresaTests : IDisposable
         var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == id);
 
         Assert.Equal(EntornoDeReglas.CuentaId, conversacion.CuentaContextoId);
+        Assert.Equal(EntornoDeReglas.TitularId, conversacion.AnalistaAtendiendoId);
     }
 
     [Fact]

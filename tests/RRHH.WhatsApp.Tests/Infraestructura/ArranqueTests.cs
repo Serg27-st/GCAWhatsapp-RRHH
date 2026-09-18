@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -47,6 +48,7 @@ public class ArranqueTests
             _analistas,
             new EmisorTokens(Options.Create(new OpcionesJwt()), TimeProvider.System),
             Options.Create(new OpcionesArranque { EmailSistemas = emailConfigurado }),
+            new MemoryCache(new MemoryCacheOptions()),
             NullLogger<SesionController>.Instance);
 
     private void Existe(int id, string email, RolAnalista rol) =>

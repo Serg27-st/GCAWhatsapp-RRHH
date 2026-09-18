@@ -22,6 +22,14 @@
                 <div class="fila-detalle">
                     <span>de @transferencia.AnalistaOrigen</span>
 
+                    @* A1: la no urgente vence si nadie responde, y el hilo vuelve a quien la envio. *@
+                    @if (transferencia.FechaVencimiento is { } vence)
+                    {
+                        <span class="vence" title="Si no respondés, vuelve a quien te la envió">
+                            vence @HoraLima.Hace(vence)
+                        </span>
+                    }
+
                     @if (transferencia.Cuenta is { } cuenta)
                     {
                         <span>@cuenta</span>

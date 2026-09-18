@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject ClienteApi Api
 @inject SesionAnalista Sesion
+@inject IJSRuntime Js
 
 <PageTitle>Vacantes</PageTitle>
 
@@ -30,6 +31,13 @@
             <p class="@(_esError ? "error" : "ok")">@mensaje</p>
         }
 
+        @* FUN-20: las cerradas estorban en el día a día, pero son la única forma de encontrar la que
+           se cerró por error. *@
+        <label class="detalle">
+            <input type="checkbox" checked="@_verCerradas" @onchange="AlternarCerradas" />
+            Ver también las vacantes cerradas
+        </label>
+
         @foreach (var cuenta in _cuentas)
         {
             var vacantes = _vacantes[cuenta.CuentaId];
@@ -53,7 +61,7 @@
                 {
                     <table class="tabla">
                         <thead>
-                            <tr><th>Vacante</th><th>Formulario</th><th></th></tr>
+                            <tr><th>Vacante</th><th>Formulario</th><th>Código del aviso</th><th></th></tr>
                         </thead>
                         <tbody>
                             @foreach (var vacante in vacantes)
@@ -71,12 +79,51 @@
                                                   title="Sin formulario el bot no puede mandar el enlace (Regla 9)">sin formulario</span>
                                         }
                                     </td>
+                                    @* FUN-02 (A6): el código va en el aviso publicado. Quien lo escribe
+                                       —o toca el enlace— llega con la vacante ya elegida, sin menú. *@
+                                    <td>
+                                        @if (vacante.CodigoAviso is { } codigo)
+                                        {
+                                            <code>@codigo</code>
+
+                                            <button class="btn btn-link" @onclick="() => CopiarEnlace(vacante.HcId)">
+                                                Copiar enlace
+                                            </button>
+
+                                            @if (_enlaceDe == vacante.HcId)
+                                            {
+                                                @if (_enlace is { } enlace)
+                                                {
+                                                    <input class="form-control" readonly value="@enlace" />
+                                                }
+                                                else
+                                                {
+                                                    <span class="chip sin-formulario"
+                                                          title="Falta WhatsApp:NumeroPublico en la configuración de la Api">
+                                                        falta el número público
+                                                    </span>
+                                                }
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <span class="detalle">—</span>
+                                        }
+                                    </td>
                                     <td>
                                         <div class="acciones">
                                             <a class="btn" href="@($"/tablero/{vacante.HcId}")">Tablero</a>
                                             <button class="btn" @onclick="() => AlternarCampos(vacante.HcId)">Campos</button>
 
-                                            @if (_cerrando == vacante.HcId)
+                                            @* FUN-20: hasta ahora, una vacante con el enlace o el título
+                                               mal cargados solo se arreglaba tocando la base. *@
+                                            <button class="btn" @onclick="() => AbrirEdicion(vacante)">Editar</button>
+
+                                            @if (vacante.Estado == "Cerrada")
+                                            {
+                                                <button class="btn" @onclick="() => Reabrir(vacante)">Reabrir</button>
+                                            }
+                                            else if (_cerrando == vacante.HcId)
                                             {
                                                 <span>¿Cerrarla?</span>
                                                 <button class="btn btn-outline-danger" @onclick="() => Cerrar(vacante)">Sí, cerrar</button>
@@ -90,10 +137,35 @@
                                     </td>
                                 </tr>
 
+                                @if (_edicionDe == vacante.HcId)
+                                {
+                                    <tr>
+                                        <td colspan="4">
+                                            <div class="fila-form subpanel">
+                                                <label>
+                                                    Título
+                                                    <input class="form-control" @bind="_tituloEditado" @bind:event="oninput" />
+                                                </label>
+                                                <label>
+                                                    Enlace del formulario
+                                                    <input class="form-control" @bind="_urlEditada" @bind:event="oninput"
+                                                           placeholder="https://forms.gle/…" />
+                                                </label>
+                                                <label>
+                                                    Código del aviso
+                                                    <input class="form-control" @bind="_codigoEditado" @bind:event="oninput" />
+                                                </label>
+                                                <button class="btn btn-primary" @onclick="() => GuardarEdicion(vacante)">Guardar</button>
+                                                <button class="btn btn-link" @onclick="() => _edicionDe = null">Cancelar</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+
                                 @if (_camposDe == vacante.HcId)
                                 {
                                     <tr>
-                                        <td colspan="3"><EditorCampos HcId="vacante.HcId" /></td>
+                                        <td colspan="4"><EditorCampos HcId="vacante.HcId" /></td>
                                     </tr>
                                 }
                             }
@@ -131,6 +203,19 @@
     private bool _cargando = true;
     private int? _camposDe;
     private int? _cerrando;
+
+    /// <summary>FUN-20: la vacante que se está corrigiendo y lo que se escribió en el panel.</summary>
+    private int? _edicionDe;
+    private string _tituloEditado = string.Empty;
+    private string _urlEditada = string.Empty;
+    private string _codigoEditado = string.Empty;
+
+    /// <summary>Las cerradas solo se muestran para reabrir una: en el día a día estorban.</summary>
+    private bool _verCerradas;
+
+    /// <summary>FUN-02: la vacante cuyo enlace de aviso se está mostrando, y el enlace ya armado.</summary>
+    private int? _enlaceDe;
+    private string? _enlace;
     private string? _mensaje;
     private bool _esError;
 
@@ -156,7 +241,7 @@
 
         foreach (var cuenta in _cuentas)
         {
-            _vacantes[cuenta.CuentaId] = await Api.VacantesAsync(cuenta.CuentaId);
+            _vacantes[cuenta.CuentaId] = await Api.VacantesAsync(cuenta.CuentaId, _verCerradas);
             _borradores.TryAdd(cuenta.CuentaId, new BorradorVacante());
         }
 
@@ -164,6 +249,66 @@
     }
 
     private void AlternarCampos(int hcId) => _camposDe = _camposDe == hcId ? null : hcId;
+
+    private void AbrirEdicion(VacanteResumen vacante)
+    {
+        if (_edicionDe == vacante.HcId)
+        {
+            _edicionDe = null;
+            return;
+        }
+
+        _edicionDe = vacante.HcId;
+        _tituloEditado = vacante.Titulo;
+        _codigoEditado = vacante.CodigoAviso ?? string.Empty;
+
+        // El enlace no viaja en el resumen —la pantalla solo muestra si lo tiene—, así que se escribe
+        // de nuevo el que corresponda; vacío no toca el que ya está.
+        _urlEditada = string.Empty;
+    }
+
+    private async Task GuardarEdicion(VacanteResumen vacante)
+    {
+        var respuesta = await Api.EditarVacanteAsync(vacante.HcId, new PeticionEditarVacante(
+            Vacio(_tituloEditado),
+            Vacio(_urlEditada),
+            Vacio(_codigoEditado)));
+
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        _edicionDe = null;
+
+        await CargarAsync();
+
+        Informar("Vacante actualizada.");
+    }
+
+    /// <summary>FUN-20: una vacante cerrada por error vuelve a recibir postulantes.</summary>
+    private async Task Reabrir(VacanteResumen vacante)
+    {
+        var respuesta = await Api.ReabrirVacanteAsync(vacante.HcId);
+
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        await CargarAsync();
+
+        Informar($"«{vacante.Titulo}» vuelve a estar abierta. Acordate de reactivar su formulario en Google.");
+    }
+
+    private async Task AlternarCerradas()
+    {
+        _verCerradas = !_verCerradas;
+
+        await CargarAsync();
+    }
 
     private async Task Crear(CuentaDeAnalista cuenta)
     {
@@ -209,6 +354,44 @@
             _camposDe = null;
 
         await CargarAsync();
+    }
+
+    /// <summary>
+    /// FUN-02 (A6): trae el enlace del aviso y lo copia. Se muestra igual en un campo de solo lectura
+    /// porque el portapapeles del navegador puede estar bloqueado, y el analista lo necesita para
+    /// pegarlo en la publicacion de la vacante.
+    /// </summary>
+    private async Task CopiarEnlace(int hcId)
+    {
+        if (_enlaceDe == hcId)
+        {
+            _enlaceDe = null;
+            _enlace = null;
+            return;
+        }
+
+        var aviso = await Api.EnlaceAvisoAsync(hcId);
+
+        _enlaceDe = hcId;
+        _enlace = aviso?.Enlace;
+
+        if (_enlace is null)
+        {
+            // Sin numero publico configurado no hay enlace, solo el codigo: la Api lo devuelve nulo.
+            Informar("Falta configurar el número público de WhatsApp: por ahora usá el código suelto.", error: true);
+            return;
+        }
+
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", _enlace);
+            Informar("Enlace copiado.");
+        }
+        catch (JSException)
+        {
+            // El navegador puede negar el portapapeles sin HTTPS o sin permiso: queda el campo.
+            Informar("Copialo del campo de abajo: el navegador no dejó usar el portapapeles.", error: true);
+        }
     }
 
     private void Informar(string? mensaje, bool error = false)

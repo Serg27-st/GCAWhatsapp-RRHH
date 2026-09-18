@@ -65,6 +65,85 @@ public static class ClavesConfiguracion
     /// </summary>
     public const string EnvioReintentoBaseSegundos = "envio.reintento_base_segundos";
     public const string ReintentosMaximosEvento = "outbox.reintentos_maximos";
+
+    /// <summary>A9: horas habiles desde el escalamiento, sin respuesta del respaldo, antes de avisar a Jefatura.</summary>
+    public const string EscalamientoHorasSegundoNivel = "escalamiento.horas_segundo_nivel";
+
+    /// <summary>P3: horas habiles en «Sin clasificar» antes de avisar a Jefatura. Ningun hilo sin dueño ni plazo.</summary>
+    public const string ClasificacionHorasAviso = "clasificacion.horas_aviso";
+
+    /// <summary>R19: reintentos del menu antes de derivar. Reemplaza el literal de la regla (B1).</summary>
+    public const string MenuReintentosPermitidos = "menu.reintentos_permitidos";
+
+    /// <summary>A12: horas habiles de silencio tras un texto no reconocido antes de derivar a «Sin clasificar».</summary>
+    public const string MenuHorasDerivacion = "menu.horas_derivacion";
+
+    /// <summary>A1: horas habiles hasta que vence una transferencia no urgente sin respuesta.</summary>
+    public const string TransferenciaHorasVencimiento = "transferencia.horas_vencimiento";
+
+    /// <summary>A14: dias antes del archivado en que se avisa al analista.</summary>
+    public const string ArchivadoAvisoDias = "conversacion.aviso_archivado_dias";
+
+    /// <summary>A11: el cierre de cortesia sale por defecto al descartar; el analista puede marcar «no enviar».</summary>
+    public const string CierreAutomatico = "cierre.automatico";
+
+    /// <summary>ARQ-13: dias que se conservan los eventos ya procesados de la outbox antes de purgarlos.</summary>
+    public const string OutboxRetencionDiasProcesados = "outbox.retencion_dias_procesados";
+
+    /// <summary>R17: dias de retencion de los adjuntos que llegan por WhatsApp (V33).</summary>
+    public const string RetencionAdjuntosDias = "datos.retencion_adjuntos_dias";
+}
+
+/// <summary>
+/// Algo que una persona tiene que resolver para que los postulantes no se queden sin respuesta: una
+/// plantilla sin aprobar, una vacante abierta sin formulario (V32, ARQ-09).
+/// <para>
+/// Agrupada por (<see cref="Tipo"/>, <see cref="Clave"/>): una fila abierta con contador, no una por
+/// ocurrencia. La misma plantilla sin aprobar se dispara por cada postulante que la necesita, y cien
+/// filas iguales esconden lo unico que importa. No lleva datos personales: la clave identifica lo que
+/// hay que arreglar (<c>hc:12</c>), no a la persona afectada, asi que no entra en la Regla 17.
+/// </para>
+/// </summary>
+public class AlertaOperativa
+{
+    public int AlertaId { get; set; }
+
+    /// <summary>Uno de <see cref="TiposAlerta"/>.</summary>
+    public required string Tipo { get; set; }
+
+    /// <summary>Lo que hay que arreglar, por ejemplo <c>plantilla:recordatorio_24h</c> o <c>hc:12</c>.</summary>
+    public required string Clave { get; set; }
+
+    /// <summary>El detalle de la ultima ocurrencia.</summary>
+    public string? Detalle { get; set; }
+
+    public int Ocurrencias { get; set; }
+    public DateTime FechaPrimera { get; set; }
+    public DateTime FechaUltima { get; set; }
+
+    /// <summary>Nula mientras esta abierta. Una ocurrencia posterior a la resolucion abre otra fila.</summary>
+    public DateTime? FechaResuelta { get; set; }
+
+    public int? ResueltaPorAnalistaId { get; set; }
+}
+
+/// <summary>Tipos de <see cref="AlertaOperativa"/>. Constantes para que quien registra y quien filtra no se separen.</summary>
+public static class TiposAlerta
+{
+    /// <summary>El bot necesito una plantilla que Meta no aprobo: el mensaje no salio.</summary>
+    public const string PlantillaNoAprobada = "PlantillaNoAprobada";
+
+    /// <summary>Una vacante abierta sin formulario cargado: el postulante no recibe el enlace.</summary>
+    public const string VacanteSinFormulario = "VacanteSinFormulario";
+
+    /// <summary>No hay cuentas con vacantes abiertas: el menu del bot no tiene nada que ofrecer.</summary>
+    public const string MenuSinOpciones = "MenuSinOpciones";
+
+    public const string CuentaSinTitular = "CuentaSinTitular";
+
+    public const string CuentaSinRespaldo = "CuentaSinRespaldo";
+
+    public const string CuentaDesactivadaConConversaciones = "CuentaDesactivadaConConversaciones";
 }
 
 /// <summary>

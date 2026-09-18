@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using RRHH.WhatsApp.Application.Reglas;
 using RRHH.WhatsApp.Domain.Entidades;
+using RRHH.WhatsApp.Domain.Enums;
 using RRHH.WhatsApp.Domain.Interfaces;
 using RRHH.WhatsApp.Domain.Reglas;
 
@@ -18,34 +19,61 @@ public sealed record ResultadoRespuestaAnalista(
 /// una persona, y por eso es donde la Regla 15 tiene efecto real: sin opt-in no sale nada, y fuera
 /// de la ventana de 24h solo puede salir una plantilla aprobada por Meta.
 /// <para>
-/// Corre sincronico y no por la outbox a proposito: el analista tiene que enterarse en el acto de
-/// que su mensaje no salio, no descubrirlo despues en un log.
+/// Corre sincronico y no por la outbox a proposito (V14): el analista tiene que enterarse en el acto
+/// de que su mensaje no salio, no descubrirlo despues en un log.
+/// </para>
+/// <para>
+/// Registra la fila antes de llamar al proveedor, con la clave que genera la bandeja al redactar
+/// (V29). Un doble clic, o la bandeja reintentando porque perdio la respuesta, devuelve el mensaje
+/// que ya existe en vez de mandar otro. La fila nace Enviando: el despachador del Worker solo toma
+/// EnCola, asi que no puede mandarla por su cuenta mientras esto la envia.
 /// </para>
 /// </summary>
 public sealed class EnvioAnalista(
-    IWhatsAppProvider proveedor,
     IConversacionService conversaciones,
     IMensajeService mensajes,
     IPlantillaService plantillas,
     IEventoSistemaService eventos,
+    IAuditoriaService auditoria,
     IFabricaContextoRegla fabrica,
     IMotorReglas motor,
+    DespachoEnvios despacho,
     TimeProvider reloj,
     ILogger<EnvioAnalista> log)
 {
+    /// <param name="claveIdempotencia">
+    /// La genera la bandeja por mensaje redactado. <see cref="Guid.Empty"/> o nula significa que el
+    /// cliente no la manda: cada llamada es un envio distinto, como antes de la cola.
+    /// </param>
     public async Task<ResultadoRespuestaAnalista> ResponderAsync(
         int conversacionId,
         int analistaId,
         string? texto,
         string? clavePlantilla,
         IReadOnlyList<string>? parametros,
+        Guid? claveIdempotencia = null,
         CancellationToken ct = default)
     {
+        var clave = claveIdempotencia is { } g && g != Guid.Empty
+            ? $"ana:{g:N}"
+            : $"ana:{Guid.NewGuid():N}";
+
+        // Ya se proceso este mismo mensaje: se devuelve lo que paso, sin volver a evaluar ni enviar.
+        if (await mensajes.ObtenerPorClaveIdempotenciaAsync(clave, ct) is { } previo)
+            return ResultadoDe(previo);
+
         var conversacion = await conversaciones.ObtenerPorIdAsync(conversacionId, ct)
             ?? throw new InvalidOperationException($"No existe la conversacion {conversacionId}.");
 
+        // FUN-01 (P3): responder sin tomar dejaria un hilo contestado que sigue figurando sin dueño
+        // en la bandeja general, y con el bot todavia a cargo del menu (V30).
+        if (conversacion.Estado is EstadoConversacion.PendienteClasificar or EstadoConversacion.EnMenuBot)
+        {
+            return new(false, MotivosBandeja.TomarPrimero, RequierePlantilla: false, null);
+        }
+
         var correlationId = Guid.NewGuid();
-        var contexto = await fabrica.ParaEnvioSalienteAsync(conversacionId, correlationId, ct);
+        var contexto = await fabrica.ParaEnvioSalienteAsync(conversacionId, correlationId, clave, ct);
 
         var acciones = await motor.ProcesarAsync(contexto, ct);
 
@@ -59,91 +87,64 @@ public sealed class EnvioAnalista(
             return new(false, bloqueo.Motivo, RequierePlantilla: false, null);
         }
 
-        // Los avisos que produjo la regla se publican igual: un intento fuera de ventana es
-        // justamente lo que conviene poder auditar despues.
+        // Los eventos que produjo alguna regla se publican igual, como en cualquier evaluacion.
         foreach (var aviso in acciones.OfType<PublicarEvento>())
             await eventos.PublicarAsync(aviso.Tipo, aviso.Payload, correlationId, ct);
 
-        var ventanaCerrada = acciones.Any(
-            a => a is PublicarEvento { Tipo: TiposEvento.EnvioRequierePlantilla });
+        var ventanaCerrada = acciones.OfType<RequierePlantilla>().Any();
 
         if (ventanaCerrada && string.IsNullOrWhiteSpace(clavePlantilla))
         {
+            // Un intento de texto libre fuera de la ventana es justo lo que conviene poder revisar
+            // despues, con quien lo intento. Antes era un evento de la outbox que nadie consumia (V32).
+            await auditoria.RegistrarAsync(
+                nameof(Conversacion), conversacionId.ToString(), analistaId, "EnvioRequierePlantilla",
+                "Respuesta en texto libre rechazada: la ventana de 24h estaba cerrada (Regla 15).", ct);
+
             return new(false,
                 "Pasaron mas de 24 horas desde el ultimo mensaje del postulante: solo se puede " +
                 "responder con una plantilla aprobada por Meta.",
                 RequierePlantilla: true, null);
         }
 
-        return string.IsNullOrWhiteSpace(clavePlantilla)
-            ? await EnviarTextoAsync(conversacion, analistaId, texto, correlationId, ct)
-            : await EnviarPlantillaAsync(conversacion, analistaId, clavePlantilla, parametros ?? [], correlationId, ct);
-    }
+        var saliente = string.IsNullOrWhiteSpace(clavePlantilla)
+            // FUN-09 (A3, R11): con procesos vivos en dos cuentas, el texto dice de cual habla. La
+            // plantilla no lo lleva: su contenido esta aprobado por Meta y no se puede tocar.
+            ? ArmarTexto(PrefijoMultiCuenta.Aplicar(
+                texto ?? string.Empty, contexto.PostulacionesDelPostulante, conversacion.CuentaContextoId))
+            : await ArmarPlantillaAsync(clavePlantilla, parametros ?? [], ct);
 
-    private async Task<ResultadoRespuestaAnalista> EnviarTextoAsync(
-        Conversacion conversacion, int analistaId, string? texto, Guid correlationId, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(texto))
-            return new(false, "El mensaje esta vacio.", RequierePlantilla: false, null);
+        if (saliente.Rechazo is { } rechazo)
+            return rechazo;
 
-        var resultado = await proveedor.EnviarTextoAsync(conversacion.TelefonoE164, texto, ct);
+        var mensaje = await mensajes.EncolarSalienteAsync(
+            conversacion.ConversacionId, saliente.Saliente!, clave, analistaId, correlationId,
+            reservadoParaEnvio: true, ct);
 
-        return await RegistrarAsync(conversacion, analistaId, texto, null, resultado, correlationId, ct);
-    }
-
-    private async Task<ResultadoRespuestaAnalista> EnviarPlantillaAsync(
-        Conversacion conversacion, int analistaId, string clave,
-        IReadOnlyList<string> parametros, Guid correlationId, CancellationToken ct)
-    {
-        // Nula si no existe o si sigue inactiva por falta de aprobacion en Meta. El analista tiene
-        // que saber cual de las dos cosas pasa, porque ninguna la resuelve reintentando.
-        var plantilla = await plantillas.ObtenerPlantillaParaEventoAsync(clave, ct);
-
-        if (plantilla is null)
+        // Otra peticion con la misma clave gano la carrera entre la consulta de arriba y el guardado.
+        if (mensaje is null)
         {
-            return new(false,
-                $"La plantilla '{clave}' no existe en el catalogo o todavia no fue aprobada por Meta.",
-                RequierePlantilla: false, null);
+            return await mensajes.ObtenerPorClaveIdempotenciaAsync(clave, ct) is { } ganador
+                ? ResultadoDe(ganador)
+                : new(false, "No se pudo registrar el mensaje.", RequierePlantilla: false, null);
         }
 
-        if (plantilla.CantidadParametros != parametros.Count)
-        {
-            return new(false,
-                $"La plantilla '{clave}' espera {plantilla.CantidadParametros} parametro(s) y se enviaron {parametros.Count}.",
-                RequierePlantilla: false, null);
-        }
-
-        var resultado = await proveedor.EnviarPlantillaAsync(
-            conversacion.TelefonoE164, plantilla, parametros, ct);
-
-        return await RegistrarAsync(
-            conversacion, analistaId, plantilla.TextoAprobado, plantilla.PlantillaId,
-            resultado, correlationId, ct, parametros);
-    }
-
-    private async Task<ResultadoRespuestaAnalista> RegistrarAsync(
-        Conversacion conversacion, int analistaId, string contenido, int? plantillaId,
-        ResultadoEnvio resultado, Guid correlationId, CancellationToken ct,
-        IReadOnlyList<string>? parametrosPlantilla = null)
-    {
-        var mensaje = await mensajes.RegistrarSalienteAsync(
-            conversacion.ConversacionId, contenido, plantillaId, analistaId,
-            resultado.ProviderMessageId, correlationId, parametrosPlantilla, ct);
+        var resultado = await despacho.EnviarSegunTipoAsync(mensaje, ct);
 
         if (!resultado.Exito)
         {
             log.LogError("Fallo la respuesta del analista {AnalistaId} en la conversacion {ConversacionId}: {Error}",
                 analistaId, conversacion.ConversacionId, resultado.Error);
 
-            // El analista ve el motivo en la respuesta, pero el hilo tambien tiene que mostrarlo:
-            // sin esto el mensaje queda en Pendiente para siempre y nadie sabe por que no salio.
+            // El analista ve el motivo en la respuesta, pero el hilo tambien tiene que mostrarlo.
             // No se agenda reintento automatico: el analista esta mirando la pantalla y decide si
             // reescribe o vuelve a intentar, que es mejor que un reenvio a sus espaldas.
-            await mensajes.MarcarEnvioFallidoAsync(
-                mensaje.MensajeId, resultado.Error, resultado.Clase, null, ct);
+            await mensajes.MarcarEnvioFallidoAsync(mensaje.MensajeId, resultado.Error, resultado.Clase, null, ct);
 
             return new(false, resultado.Error, RequierePlantilla: false, mensaje.MensajeId);
         }
+
+        await mensajes.MarcarEnvioLogradoAsync(mensaje.MensajeId, resultado.ProviderMessageId, ct);
 
         // Detiene el reloj de la Regla 2. Sin esta marca el Worker escalaria una conversacion que
         // el analista acaba de atender.
@@ -152,4 +153,46 @@ public sealed class EnvioAnalista(
 
         return new(true, null, RequierePlantilla: false, mensaje.MensajeId);
     }
+
+    private static (SalienteEncolado? Saliente, ResultadoRespuestaAnalista? Rechazo) ArmarTexto(string? texto) =>
+        string.IsNullOrWhiteSpace(texto)
+            ? (null, new(false, "El mensaje esta vacio.", RequierePlantilla: false, null))
+            : (new SalienteEncolado(TipoSaliente.Texto, texto), null);
+
+    private async Task<(SalienteEncolado? Saliente, ResultadoRespuestaAnalista? Rechazo)> ArmarPlantillaAsync(
+        string clave, IReadOnlyList<string> parametros, CancellationToken ct)
+    {
+        // Nula si no existe o si sigue inactiva por falta de aprobacion en Meta. El analista tiene
+        // que saber cual de las dos cosas pasa, porque ninguna la resuelve reintentando.
+        var plantilla = await plantillas.ObtenerPlantillaParaEventoAsync(clave, ct);
+
+        if (plantilla is null)
+        {
+            return (null, new(false,
+                $"La plantilla '{clave}' no existe en el catalogo o todavia no fue aprobada por Meta.",
+                RequierePlantilla: false, null));
+        }
+
+        if (plantilla.CantidadParametros != parametros.Count)
+        {
+            return (null, new(false,
+                $"La plantilla '{clave}' espera {plantilla.CantidadParametros} parametro(s) y se enviaron {parametros.Count}.",
+                RequierePlantilla: false, null));
+        }
+
+        return (new SalienteEncolado(
+            TipoSaliente.Plantilla, plantilla.TextoAprobado, plantilla.PlantillaId, parametros), null);
+    }
+
+    /// <summary>Lo que ya paso con un mensaje de la misma clave, en los terminos que entiende la bandeja.</summary>
+    private static ResultadoRespuestaAnalista ResultadoDe(Mensaje mensaje) => mensaje.EstadoEntrega switch
+    {
+        EstadoEntrega.Fallido => new(false, mensaje.ErrorProveedor, RequierePlantilla: false, mensaje.MensajeId),
+
+        // Otra peticion con la misma clave lo esta enviando ahora: no se manda de nuevo.
+        EstadoEntrega.Enviando or EstadoEntrega.EnCola =>
+            new(false, "Este mensaje ya se esta enviando.", RequierePlantilla: false, mensaje.MensajeId),
+
+        _ => new(true, null, RequierePlantilla: false, mensaje.MensajeId)
+    };
 }

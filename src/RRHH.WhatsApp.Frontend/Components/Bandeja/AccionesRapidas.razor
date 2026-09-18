@@ -23,8 +23,10 @@
             <select class="form-select" @bind="_destinoId">
                 <option value="0">Elegir analista…</option>
 
-                @* Jefatura y Sistemas no atienden conversaciones (V23): la Api rechazaria la transferencia. *@
-                @foreach (var analista in _analistas.Where(a => a.AnalistaId != Sesion.AnalistaId && a.Rol == "Analista"))
+                @* Jefatura y Sistemas no atienden conversaciones (V23) y quien esta ausente tampoco va a
+                   responder (FUN-07): la Api rechaza los dos casos, asi que no se ofrecen. *@
+                @foreach (var analista in _analistas.Where(a =>
+                    a.AnalistaId != Sesion.AnalistaId && a.Rol == "Analista" && !a.Ausente))
                 {
                     <option value="@analista.AnalistaId">@analista.Nombre</option>
                 }
@@ -33,6 +35,16 @@
             <label class="urgente">
                 <input type="checkbox" @bind="_urgente" />
                 Urgente (se aplica sin esperar que la acepten)
+            </label>
+        }
+
+        @* FUN-10 (A11): la despedida sale por defecto al descartar; el analista puede evitarla,
+           por ejemplo si ya se lo dijo por teléfono y el mensaje sonaría a duplicado. *@
+        @if (accion == Accion.Blacklist)
+        {
+            <label class="urgente">
+                <input type="checkbox" @bind="_enviarCierre" />
+                Enviar mensaje de cierre al postulante
             </label>
         }
 
@@ -64,6 +76,7 @@
     private string _motivo = string.Empty;
     private int _destinoId;
     private bool _urgente;
+    private bool _enviarCierre = true;
     private string? _error;
 
     /// <summary>Marcar necesita el DNI: hasta que complete el formulario solo hay un teléfono.</summary>
@@ -78,6 +91,7 @@
         _motivo = string.Empty;
         _destinoId = 0;
         _urgente = false;
+        _enviarCierre = true;
         _error = null;
     }
 
@@ -111,7 +125,8 @@
                 Detalle.Postulaciones[0].PostulanteId,
                 Detalle.Resumen.CuentaId!.Value,
                 accion.ToString(),
-                Vacio(_motivo)));
+                Vacio(_motivo),
+                EnviarCierre: _enviarCierre));
 
         if (!respuesta.Exito)
         {

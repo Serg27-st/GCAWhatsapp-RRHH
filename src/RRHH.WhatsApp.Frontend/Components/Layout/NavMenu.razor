@@ -1,5 +1,6 @@
 @implements IDisposable
 @inject SesionAnalista Sesion
+@inject ClienteApi Api
 
 <div class="nav-lateral">
     <div class="marca">
@@ -25,7 +26,15 @@
 
         @if (Sesion.EsSistemas)
         {
-            <NavLink href="/configuracion">Configuración</NavLink>
+            @* FUN-15: el contador es lo que hace que alguien entre a mirar. Sin él, una plantilla sin
+               aprobar o una vacante sin formulario esperan a que a alguien se le ocurra revisar. *@
+            <NavLink href="/configuracion">
+                Configuración
+                @if (_alertas > 0)
+                {
+                    <span class="contador-alertas" title="Alertas operativas abiertas">@_alertas</span>
+                }
+            </NavLink>
         }
 
         @if (Sesion.Activa)
@@ -36,9 +45,32 @@
 </div>
 
 @code {
+    private int _alertas;
+
     protected override void OnInitialized() => Sesion.Cambio += AlCambiarSesion;
 
-    private void AlCambiarSesion() => InvokeAsync(StateHasChanged);
+    protected override Task OnParametersSetAsync() => ContarAlertasAsync();
+
+    private void AlCambiarSesion()
+    {
+        InvokeAsync(StateHasChanged);
+
+        // Al entrar con una sesión nueva se vuelve a contar: quien administra tiene que verlo apenas entra.
+        InvokeAsync(ContarAlertasAsync);
+    }
+
+    private async Task ContarAlertasAsync()
+    {
+        if (!Sesion.EsSistemas)
+        {
+            _alertas = 0;
+            return;
+        }
+
+        _alertas = (await Api.AlertasAsync()).Count;
+
+        StateHasChanged();
+    }
 
     public void Dispose() => Sesion.Cambio -= AlCambiarSesion;
 }

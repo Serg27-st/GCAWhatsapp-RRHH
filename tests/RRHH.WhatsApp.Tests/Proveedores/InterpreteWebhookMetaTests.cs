@@ -1,4 +1,5 @@
 using RRHH.WhatsApp.Domain.Enums;
+using RRHH.WhatsApp.Domain.Interfaces;
 using RRHH.WhatsApp.Infrastructure.Proveedores;
 
 namespace RRHH.WhatsApp.Tests.Proveedores;
@@ -63,13 +64,67 @@ public class InterpreteWebhookMetaTests
         Assert.Equal("Confirmo", mensaje.Contenido);
     }
 
+    /// <summary>
+    /// ARQ-10 (M3): mandar el CV por WhatsApp es habitual, y antes quedaba solo el texto
+    /// <c>[document]</c>. Ahora el mensaje trae lo necesario para descargarlo.
+    /// </summary>
     [Fact]
-    public void Un_adjunto_deja_constancia_del_tipo_en_vez_de_perderse()
+    public void Un_documento_trae_su_medio_para_descargarlo()
     {
         var mensaje = Assert.Single(InterpreteWebhookMeta.Mensajes(PayloadsDePrueba.Adjunto, DateTime.UtcNow));
 
-        Assert.Equal("[document]", mensaje.Contenido);
+        Assert.Equal("[documento: cv.pdf]", mensaje.Contenido);
         Assert.Null(mensaje.IdBotonPulsado);
+
+        var medio = Assert.IsType<MedioEntranteDto>(mensaje.Medio);
+        Assert.Equal("1037543291543636", medio.ProveedorMedioId);
+        Assert.Equal("document", medio.Tipo);
+        Assert.Equal("application/pdf", medio.MimeType);
+        Assert.Equal("cv.pdf", medio.NombreArchivo);
+        Assert.Null(medio.Leyenda);
+    }
+
+    /// <summary>La leyenda es lo que la persona escribió: es el contenido que ven las reglas y el analista.</summary>
+    [Fact]
+    public void Con_leyenda_el_contenido_es_la_leyenda()
+    {
+        var mensaje = Assert.Single(InterpreteWebhookMeta.Mensajes(PayloadsDePrueba.ImagenConLeyenda, DateTime.UtcNow));
+
+        Assert.Equal("Mi DNI por ambos lados", mensaje.Contenido);
+        Assert.Equal("image", mensaje.Medio!.Tipo);
+        Assert.Equal("image/jpeg", mensaje.Medio.MimeType);
+        Assert.Equal("Mi DNI por ambos lados", mensaje.Medio.Leyenda);
+        Assert.Null(mensaje.Medio.NombreArchivo);
+    }
+
+    [Theory]
+    [InlineData(PayloadsDePrueba.NotaDeVoz, "[audio]", "audio", "audio/ogg; codecs=opus")]
+    [InlineData(PayloadsDePrueba.Sticker, "[sticker]", "sticker", "image/webp")]
+    public void Sin_leyenda_ni_nombre_queda_el_tipo_en_castellano(string payload, string contenido, string tipo, string mime)
+    {
+        var mensaje = Assert.Single(InterpreteWebhookMeta.Mensajes(payload, DateTime.UtcNow));
+
+        Assert.Equal(contenido, mensaje.Contenido);
+        Assert.Equal(tipo, mensaje.Medio!.Tipo);
+        Assert.Equal(mime, mensaje.Medio.MimeType);
+    }
+
+    /// <summary>Lo que no es un archivo sigue dejando constancia del tipo, sin nada que descargar.</summary>
+    [Fact]
+    public void Una_ubicacion_no_trae_medio()
+    {
+        var mensaje = Assert.Single(InterpreteWebhookMeta.Mensajes(PayloadsDePrueba.Ubicacion, DateTime.UtcNow));
+
+        Assert.Equal("[location]", mensaje.Contenido);
+        Assert.Null(mensaje.Medio);
+    }
+
+    [Fact]
+    public void Un_texto_no_trae_medio()
+    {
+        var mensaje = Assert.Single(InterpreteWebhookMeta.Mensajes(PayloadsDePrueba.MensajeDeTexto, DateTime.UtcNow));
+
+        Assert.Null(mensaje.Medio);
     }
 
     [Fact]

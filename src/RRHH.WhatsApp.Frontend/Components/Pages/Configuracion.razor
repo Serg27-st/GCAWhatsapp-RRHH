@@ -108,6 +108,57 @@
             }
         </section>
 
+        @* FUN-15 (M1): sin esta sección, las alertas quedan en una tabla que nadie mira, y el problema
+           —una plantilla sin aprobar, una vacante sin formulario— sigue dejando postulantes sin respuesta. *@
+        <section>
+            <h2>Alertas operativas</h2>
+            <p class="detalle">
+                Lo que el sistema no puede resolver solo. Se agrupan por tipo y clave: el contador dice
+                cuántas veces volvió a pasar. Resolver una no cierra el problema —si vuelve a ocurrir se
+                abre otra—, así que es la forma de ver si algo se dio por arreglado sin estarlo.
+            </p>
+
+            @if (_alertas.Count == 0)
+            {
+                <p class="ok">No hay alertas abiertas.</p>
+            }
+            else
+            {
+                <table class="tabla">
+                    <thead>
+                        <tr>
+                            <th>Qué pasa</th><th>Dónde</th><th>Detalle</th>
+                            <th>Veces</th><th>Desde</th><th>Última</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var alerta in _alertas)
+                        {
+                            <tr @key="alerta.AlertaId">
+                                <td>@alerta.Tipo</td>
+                                <td><code>@alerta.Clave</code></td>
+                                <td class="detalle">@alerta.Detalle</td>
+                                <td>@alerta.Ocurrencias</td>
+                                <td>@HoraLima.Desde(alerta.FechaPrimera).ToString("dd/MM HH:mm")</td>
+                                <td>@HoraLima.Desde(alerta.FechaUltima).ToString("dd/MM HH:mm")</td>
+                                <td>
+                                    <button class="btn btn-link" disabled="@(_resolviendo == alerta.AlertaId)"
+                                            @onclick="() => Resolver(alerta)">
+                                        Resolver
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            @if (_mensajeAlertas is { } mensajeAlertas)
+            {
+                <p class="@(_errorAlertas ? "error" : "ok")">@mensajeAlertas</p>
+            }
+        </section>
+
         <section>
             <h2>Plantillas</h2>
             <p class="detalle">
@@ -163,6 +214,10 @@
     private bool _errorHorario;
     private string? _mensajeParametros;
     private bool _errorParametros;
+    private IReadOnlyList<AlertaOperativaResumen> _alertas = [];
+    private int? _resolviendo;
+    private string? _mensajeAlertas;
+    private bool _errorAlertas;
 
     protected override async Task OnInitializedAsync()
     {
@@ -171,6 +226,7 @@
 
         _cuentas = await Api.CuentasAsync();
         _plantillas = await Api.PlantillasAsync();
+        _alertas = await Api.AlertasAsync();
 
         await CargarHorario();
         await CargarParametros();
@@ -235,6 +291,24 @@
 
         _mensajeParametros = $"{parametro.Clave} actualizado.";
         _errorParametros = false;
+    }
+
+    /// <summary>
+    /// FUN-15: darla por arreglada. La lista se recarga porque lo que importa es lo que sigue abierto,
+    /// y si el problema vuelve a pasar aparecerá una alerta nueva.
+    /// </summary>
+    private async Task Resolver(AlertaOperativaResumen alerta)
+    {
+        _resolviendo = alerta.AlertaId;
+        _mensajeAlertas = null;
+
+        var respuesta = await Api.ResolverAlertaAsync(alerta.AlertaId);
+
+        _errorAlertas = !respuesta.Exito;
+        _mensajeAlertas = respuesta.Exito ? "Alerta resuelta." : respuesta.Motivo;
+
+        _alertas = await Api.AlertasAsync();
+        _resolviendo = null;
     }
 
     /// <summary>

@@ -45,7 +45,7 @@ public sealed class AutenticacionService(
         {
             // Se gasta el mismo tiempo igual: responder al instante cuando el usuario no existe
             // delata cuáles sí, aunque el mensaje sea el mismo.
-            Verificar(contrasena, HashFalso());
+            Verificar(contrasena, HashFalso);
 
             return generico;
         }
@@ -58,7 +58,7 @@ public sealed class AutenticacionService(
         }
 
         return new ResultadoAutenticacion(
-            true, null, analista.AnalistaId, analista.Nombre, analista.Rol.ToString());
+            true, null, analista.AnalistaId, analista.Nombre, analista.Rol.ToString(), analista.VersionSeguridad);
     }
 
     public async Task EstablecerContrasenaAsync(
@@ -72,6 +72,11 @@ public sealed class AutenticacionService(
 
         analista.HashContrasena = Hashear(contrasena);
         analista.FechaContrasena = reloj.GetUtcNow().UtcDateTime;
+
+        // ARQ-11 (V34): cambiar la contraseña es lo que se hace cuando una cuenta pudo quedar
+        // comprometida. Sin subir la version, los tokens emitidos antes seguirian entrando hasta
+        // vencer solos, que puede ser casi toda la jornada.
+        analista.VersionSeguridad++;
 
         await db.SaveChangesAsync(ct);
 
@@ -116,6 +121,12 @@ public sealed class AutenticacionService(
         }
     }
 
-    /// <summary>Hash descartable, solo para que un usuario inexistente cueste lo mismo que uno real.</summary>
-    private static string HashFalso() => Hashear("no-importa");
+    /// <summary>
+    /// Hash descartable, solo para que un usuario inexistente cueste lo mismo que uno real.
+    /// <para>
+    /// B4 (COR-18): se calcula una vez. Hacerlo en cada intento fallido significaba derivar la clave
+    /// dos veces —210.000 iteraciones de mas— justo en el camino que recorre quien prueba contraseñas.
+    /// </para>
+    /// </summary>
+    private static readonly string HashFalso = Hashear("no-importa");
 }

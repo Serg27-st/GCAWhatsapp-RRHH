@@ -41,17 +41,22 @@ public class MotorReglasTests
     }
 
     [Fact]
-    public async Task Una_regla_que_revienta_no_tumba_el_procesamiento_completo()
+    public async Task Una_regla_que_revienta_aborta_la_evaluacion_y_no_corre_las_siguientes()
     {
+        // V35 invirtió el comportamiento anterior (registrar y seguir). Con la transacción del
+        // evento (V28), seguir tras un fallo confirmaba a propósito decisiones incompletas: las
+        // reglas siguientes decidían sin la que falló. Ahora la excepción sale, el evento se deshace
+        // y se reintenta entero.
         var orden = new List<string>();
         var motor = Motor(
             new ReglaQueFalla(prioridad: 10),
-            new ReglaEspia("sobreviviente", prioridad: 20, orden));
+            new ReglaEspia("siguiente", prioridad: 20, orden));
 
-        var acciones = await motor.ProcesarAsync(new ConstructorContexto().ConConversacion().Construir());
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            motor.ProcesarAsync(new ConstructorContexto().ConConversacion().Construir()));
 
-        Assert.Equal(["sobreviviente"], orden);
-        Assert.Single(acciones);
+        Assert.Equal("fallo simulado", error.Message);
+        Assert.Empty(orden);
     }
 
     [Fact]
@@ -80,7 +85,7 @@ public class MotorReglasTests
         var motor = Motor(new R19FallbackMenu(), new R01Asignacion());
 
         var ctx = new ConstructorContexto()
-            .ConConversacion(estado: EstadoConversacion.PendienteClasificar)
+            .ConConversacion(estado: EstadoConversacion.EnMenuBot)
             .IntentosMenu(0)
             .Construir();
 

@@ -1,4 +1,4 @@
-namespace RRHH.WhatsApp.Infrastructure.Servicios;
+namespace RRHH.WhatsApp.Domain.Calendario;
 
 /// <summary>
 /// Conversion entre UTC y la hora de Lima. En base de datos todo es UTC; el horario de atencion,

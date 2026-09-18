@@ -38,9 +38,25 @@ public enum EstadoConversacion
 {
     Activa = 1,
     Escalada = 2,
+
+    /// <summary>
+    /// «Sin clasificar»: el bot se rindio —reintentos agotados (R19) o silencio tras un texto no
+    /// reconocido (A12)— y una persona tiene que leer lo que escribio. Todos la ven; para actuar hay
+    /// que tomarla (V30).
+    /// </summary>
     PendienteClasificar = 3,
+
+    /// <summary>Reservado, sin uso: nada cierra una conversacion (B3). Se conserva porque la columna es entera y pudo persistirse.</summary>
     Cerrada = 4,
-    Archivada = 5
+
+    Archivada = 5,
+
+    /// <summary>
+    /// El bot la esta atendiendo: todavia no eligio empresa (V30). No aparece en ninguna bandeja; solo
+    /// Sistemas la mira. Antes esto era PendienteClasificar y «Sin clasificar» se llenaba de hilos que
+    /// el bot todavia estaba resolviendo.
+    /// </summary>
+    EnMenuBot = 6
 }
 
 public enum DireccionMensaje
@@ -49,13 +65,54 @@ public enum DireccionMensaje
     Saliente = 2
 }
 
+/// <summary>
+/// Estado de un mensaje. Los valores son persistidos: el orden de avance NO es el numerico (EnCola y
+/// Enviando llegaron despues, V29), y los acuses se comparan con un orden explicito en el servicio.
+/// </summary>
 public enum EstadoEntrega
 {
     Pendiente = 1,
     Enviado = 2,
     Entregado = 3,
     Leido = 4,
-    Fallido = 5
+    Fallido = 5,
+
+    /// <summary>
+    /// Decidido y guardado, todavia sin salir (V29). Lo toma el despachador del Worker, que revalida
+    /// la Regla 15 y respeta el limitador antes de enviar.
+    /// </summary>
+    EnCola = 6,
+
+    /// <summary>
+    /// Tomado para enviar. Si queda asi mas de lo que tarda un envio, se perdio el resultado: pasa a
+    /// Fallido/Ambiguo y no se reintenta solo, porque pudo haber salido.
+    /// </summary>
+    Enviando = 7
+}
+
+/// <summary>Ciclo de vida de un archivo que mando el postulante (V33, ARQ-10).</summary>
+public enum EstadoAdjunto
+{
+    /// <summary>Registrado con el webhook, todavia sin bajar. El id de medio de Meta caduca: no puede esperar.</summary>
+    Pendiente = 1,
+
+    /// <summary>Bajado, escaneado y guardado en el recurso compartido (D5).</summary>
+    Descargado = 2,
+
+    /// <summary>No paso el escaneo, el tope o la lista de extensiones, o ya no se pudo bajar. No se muestra.</summary>
+    Rechazado = 3,
+
+    /// <summary>Borrado por la retencion de la Regla 17. La fila queda como rastro, sin archivo.</summary>
+    Purgado = 4
+}
+
+/// <summary>Como se arma el mensaje al despacharlo. Es lo que permite reintentar tambien botones y listas.</summary>
+public enum TipoSaliente
+{
+    Texto = 1,
+    Plantilla = 2,
+    Botones = 3,
+    Lista = 4
 }
 
 /// <summary>Regla 7. El motivo es obligatorio para <see cref="Blacklist"/> y opcional para <see cref="Whitelist"/>.</summary>
@@ -70,7 +127,13 @@ public enum EstadoTransferencia
 {
     Pendiente = 1,
     Aceptada = 2,
-    Rechazada = 3
+    Rechazada = 3,
+
+    /// <summary>A1: el destino no respondio a tiempo. Vuelve al origen con aviso y permite pedir otra.</summary>
+    Vencida = 4,
+
+    /// <summary>A1: el origen la retiro antes de que el destino respondiera.</summary>
+    Retirada = 5
 }
 
 /// <summary>Regla 20. Una vacante cerrada desactiva su enlace de JobForms.</summary>
@@ -143,7 +206,14 @@ public enum EstadoPostulacion
     EnProceso = 1,
     Contratado = 2,
     Descartado = 3,
-    Archivada = 4
+    Archivada = 4,
+
+    /// <summary>
+    /// A2: la persona vuelve a un proceso (ex trabajador o descarte reconsiderado). Lo marca el analista.
+    /// Cuenta como proceso vivo: no se archiva (R16), no se repregunta la empresa (R9) y sus mensajes
+    /// van directo a su analista.
+    /// </summary>
+    Reingreso = 5
 }
 
 /// <summary>Tipos admitidos para los campos opcionales que el analista activa por HC.</summary>

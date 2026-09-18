@@ -37,6 +37,37 @@ public sealed class OpcionesWorker
     /// <summary>Mensajes que reintenta cada vuelta.</summary>
     public int TamanoLoteReintento { get; set; } = 50;
 
+    /// <summary>Pausa entre vueltas del despachador de envios cuando la cola quedo vacia (V29).</summary>
+    public int IntervaloDespachoSegundos { get; set; } = 2;
+
+    /// <summary>Mensajes encolados que toma cada vuelta del despachador.</summary>
+    public int TamanoLoteDespacho { get; set; } = 20;
+
+    /// <summary>
+    /// Cuanto puede quedar un mensaje Enviando antes de darlo por perdido y marcarlo ambiguo. Tiene
+    /// que superar holgadamente el timeout HTTP del adaptador: marcar ambiguo un envio en curso lo
+    /// dejaria fuera del hilo aunque haya salido bien.
+    /// </summary>
+    public int TimeoutEnviandoSegundos { get; set; } = 120;
+
+    /// <summary>
+    /// Pausa entre vueltas de la descarga de adjuntos cuando no quedo nada por bajar (V33). Corta: el
+    /// id de medio caduca, y el analista espera ver el CV poco despues de que llega.
+    /// </summary>
+    public int IntervaloDescargaAdjuntosSegundos { get; set; } = 30;
+
+    /// <summary>Adjuntos que baja cada vuelta. Cada uno puede pesar varios megas.</summary>
+    public int TamanoLoteDescargaAdjuntos { get; set; } = 10;
+
+    /// <summary>Intentos por adjunto antes de darlo por perdido.</summary>
+    public int IntentosDescargaAdjunto { get; set; } = 5;
+
+    /// <summary>Espera tras el primer fallo de una descarga; se duplica en cada intento (1, 2, 4, 8 min).</summary>
+    public int EsperaReintentoDescargaSegundos { get; set; } = 60;
+
+    /// <summary>Cuanto puede tardar un adjunto, bajada y antivirus incluidos, antes de cortarlo y reintentar.</summary>
+    public int TiempoMaximoDescargaSegundos { get; set; } = 300;
+
     /// <summary>Pausa tras fallar el lote completo, para no golpear un recurso que ya esta caido.</summary>
     public int PausaTrasErrorSegundos { get; set; } = 30;
 

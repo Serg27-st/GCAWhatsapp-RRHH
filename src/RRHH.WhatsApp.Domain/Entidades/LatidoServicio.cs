@@ -38,12 +38,24 @@ public static class ServiciosVigilados
     public const string ReintentoEnvios = "ReintentoEnvios";
 
     /// <summary>
+    /// El despachador de la cola de envios (V29). Sin el, nada de lo que decide el bot sale: los
+    /// mensajes quedan EnCola.
+    /// </summary>
+    public const string DespachoEnvios = "DespachoEnvios";
+
+    /// <summary>
     /// La guardia que tiene el candado del Worker (V24). Su detalle dice que maquina y que proceso
     /// es la instancia activa: con dos Workers en juego, es lo primero que hay que saber.
     /// </summary>
     public const string InstanciaActiva = "InstanciaActiva";
 
+    /// <summary>
+    /// La descarga de los archivos que mandan los postulantes (V33). Sin ella quedan pendientes hasta
+    /// que el id de medio caduca, y se pierden.
+    /// </summary>
+    public const string DescargaAdjuntos = "DescargaAdjuntos";
+
     /// <summary>Lo que el health vigila del Worker. Si falta alguno, lo reporta como detenido.</summary>
     public static readonly IReadOnlyList<string> Todos =
-        [ConsumidorOutbox, BarridoTiempo, PurgaCv, ReintentoEnvios, InstanciaActiva];
+        [ConsumidorOutbox, BarridoTiempo, PurgaCv, ReintentoEnvios, DespachoEnvios, DescargaAdjuntos, InstanciaActiva];
 }

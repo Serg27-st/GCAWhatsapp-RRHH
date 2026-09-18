@@ -1,3 +1,4 @@
+using RRHH.WhatsApp.Domain.Entidades;
 using RRHH.WhatsApp.Domain.Enums;
 using RRHH.WhatsApp.Domain.Reglas;
 
@@ -6,43 +7,59 @@ namespace RRHH.WhatsApp.Application.Reglas.Implementaciones;
 /// <summary>
 /// Regla 19 — Fallback de menu no reconocido.
 /// <para>
-/// Si el postulante escribe texto libre en vez de usar los botones, el bot reintenta una vez
-/// mostrando el menu. Si sigue sin elegir una opcion valida, la conversacion pasa a la bandeja
-/// general de pendientes por clasificar, visible para todos los analistas, para que cualquiera
-/// la tome manualmente.
+/// Si el postulante escribe texto libre en vez de usar los botones, el bot reintenta mostrando el
+/// menu las veces que diga <see cref="ClavesConfiguracion.MenuReintentosPermitidos"/>. Agotadas,
+/// la conversacion pasa a la bandeja general de pendientes por clasificar, visible para todos los
+/// analistas, para que cualquiera la tome (FUN-01).
+/// </para>
+/// <para>
+/// El contador vive en la conversacion (COR-06). Antes se calculaba como «todos los entrantes menos
+/// uno», asi que un postulante con historia al que se le limpiaba el contexto entraba ya por encima
+/// del umbral y su siguiente mensaje iba directo a la bandeja general sin ver el menu (AL2).
 /// </para>
 /// </summary>
 public sealed class R19FallbackMenu : IReglaNegocio
 {
-    /// <summary>Un solo reintento antes de derivar a la bandeja general, como define la regla.</summary>
-    private const int ReintentosPermitidos = 1;
-
     public string Codigo => "R19";
 
-    public string Descripcion => "Reintenta el menu una vez y luego deriva a la bandeja general de pendientes por clasificar.";
+    public string Descripcion => "Reintenta el menu y luego deriva a la bandeja general de pendientes por clasificar.";
 
     /// <summary>Antes que la asignacion: mientras no haya cuenta identificada no hay a quien asignar.</summary>
     public int Prioridad => 15;
 
     public bool Aplica(ContextoRegla ctx) =>
         ctx.Disparador == TipoDisparador.MensajeEntrante
-        && ctx.Conversacion is not null
-        // Solo interviene mientras el bot no logro identificar la cuenta.
-        && ctx.Cuenta is null;
+        // Solo mientras el bot esta atendiendo: en «Sin clasificar» el hilo ya espera a una persona,
+        // y volver a mostrarle el menu lo sacaria de esa cola (B6, V30).
+        && ctx.Conversacion is { Estado: EstadoConversacion.EnMenuBot }
+        && ctx.Cuenta is null
+        // FUN-02: si el mensaje trajo un codigo de aviso o el nombre de una empresa, el postulante si
+        // eligio, aunque la cuenta no se haya podido cargar. Mostrarle el menu seria ignorarlo.
+        && ctx.OrigenEleccion == OrigenEleccion.Ninguna
+        // FUN-08 (A2): con un unico proceso vivo tampoco hay nada que preguntar; lo retoma la R01.
+        && ctx.CuentasVivas.Count != 1;
 
     public Task<ResultadoRegla> EvaluarAsync(ContextoRegla ctx, CancellationToken ct = default)
     {
-        if (ctx.IntentosMenuFallidos <= ReintentosPermitidos)
+        // FUN-03: pedir otra pagina del menu no es fallar en elegir; el contador no se mueve.
+        if (ctx.PaginaMenu > 0)
+            return Task.FromResult(ResultadoRegla.Con(new MostrarMenuEmpresas(EsReintento: false, ctx.PaginaMenu)));
+
+        var intentos = ctx.IntentosMenuFallidos;
+        var permitidos = ctx.ConfigInt(ClavesConfiguracion.MenuReintentosPermitidos, 1);
+
+        // El primer mensaje del hilo no es un fallo del postulante: todavia no vio ningun menu.
+        if (intentos < permitidos + 1)
         {
             return Task.FromResult(ResultadoRegla.Con(
-                new MostrarMenuEmpresas(EsReintento: ctx.IntentosMenuFallidos > 0)));
+                new RegistrarIntentoMenu(TextoNoReconocido: intentos > 0),
+                new MostrarMenuEmpresas(EsReintento: intentos > 0)));
         }
 
-        // Agotado el reintento, la conversacion no se pierde: queda visible para todo el equipo.
+        // Agotados los reintentos, la conversacion no se pierde: queda visible para todo el equipo,
+        // con la fecha desde la que espera (P3).
         return Task.FromResult(ResultadoRegla.Con(
-            new CambiarEstadoConversacion(EstadoConversacion.PendienteClasificar),
-            new RegistrarAuditoria(
-                "DerivadaABandejaGeneral",
-                $"El postulante no eligio una opcion valida tras {ctx.IntentosMenuFallidos} intentos.")));
+            new DerivarAPendientes(
+                $"El postulante no eligio una opcion valida tras {intentos} intentos.")));
     }
 }

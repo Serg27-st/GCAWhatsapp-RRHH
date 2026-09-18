@@ -86,7 +86,13 @@
         }
 
         _actual = _nueva = _repetida = string.Empty;
-        _mensaje = "Contraseña cambiada. Esta sesión sigue abierta hasta que venza.";
+
+        // ARQ-11 (V34): cambiar la contraseña sube la versión de seguridad, así que este token deja de
+        // servir junto con los demás. Se cierra la sesión acá para que quede claro, en vez de dejar que
+        // la próxima acción falle con un «tu sesión expiró» que parecería otra cosa.
+        _mensaje = "Contraseña cambiada. Volvé a entrar con la nueva.";
         _esError = false;
+
+        Sesion.Cerrar();
     }
 }

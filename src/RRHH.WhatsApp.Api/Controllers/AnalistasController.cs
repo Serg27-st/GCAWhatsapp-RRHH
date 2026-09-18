@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using RRHH.WhatsApp.Api.Seguridad;
 using RRHH.WhatsApp.Contracts.Administracion;
 using RRHH.WhatsApp.Contracts.Bandeja;
@@ -38,8 +39,23 @@ public sealed class AnalistasController(
     public async Task<IActionResult> Listar(CancellationToken ct)
     {
         var activos = await analistas.ListarActivosAsync(ct);
+        var ahora = reloj.GetUtcNow().UtcDateTime;
 
-        return Ok(activos.Select(a => new AnalistaResumen(a.AnalistaId, a.Nombre, a.Email, a.Rol.ToString())));
+        var resumenes = new List<AnalistaResumen>(activos.Count);
+
+        // FUN-07: quien esta ausente no puede ser destino de una transferencia. Se calcula aca —son
+        // trece analistas— para que la bandeja no tenga que preguntar uno por uno.
+        foreach (var analista in activos)
+        {
+            resumenes.Add(new AnalistaResumen(
+                analista.AnalistaId,
+                analista.Nombre,
+                analista.Email,
+                analista.Rol.ToString(),
+                await ausencias.EstaAusenteAsync(analista.AnalistaId, ahora, ct)));
+        }
+
+        return Ok(resumenes);
     }
 
     /// <summary>
@@ -67,6 +83,65 @@ public sealed class AnalistasController(
 
             return CreatedAtAction(nameof(Listar), new AnalistaResumen(
                 analista.AnalistaId, analista.Nombre, analista.Email, analista.Rol.ToString()));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return UnprocessableEntity(new { motivo = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// FUN-19: qué tiene encima antes de tocarlo. La pantalla lo muestra en la confirmación: dar de baja
+    /// a alguien mueve conversaciones reales y deja cuentas sin quien las cubra.
+    /// </summary>
+    [HttpGet("{id:int}/cartera")]
+    [Authorize(Policy = Politicas.Jefatura)]
+    public async Task<IActionResult> Cartera(int id, CancellationToken ct)
+    {
+        var cartera = await analistas.ObtenerCarteraAsync(id, ct);
+
+        return Ok(new CarteraAnalista(
+            cartera.Conversaciones, cartera.CuentasTitular, cartera.CuentasRespaldo));
+    }
+
+    /// <summary>
+    /// FUN-19: corregir el nombre, cambiar el rol o dar de baja. Quien deja de atender conversaciones
+    /// —por la baja o por el cambio de rol— no puede llevarse su bandeja: el servicio la reasigna en la
+    /// misma transacción y le cierra las sesiones (ARQ-11).
+    /// </summary>
+    [HttpPatch("{id:int}")]
+    [Authorize(Policy = Politicas.Estructura)]
+    public async Task<IActionResult> Editar(
+        int id, [FromBody] PeticionEditarAnalista peticion, [FromServices] IMemoryCache cache, CancellationToken ct)
+    {
+        RolAnalista? rol = null;
+
+        if (!string.IsNullOrWhiteSpace(peticion.Rol))
+        {
+            if (!Enum.TryParse<RolAnalista>(peticion.Rol, ignoreCase: true, out var leido) || !Enum.IsDefined(leido))
+            {
+                return BadRequest(new
+                {
+                    motivo = $"Rol '{peticion.Rol}' desconocido. Validos: {string.Join(", ", Enum.GetNames<RolAnalista>())}."
+                });
+            }
+
+            rol = leido;
+        }
+
+        // Darse de baja a uno mismo dejaria a Sistemas sin nadie que pueda volver a habilitarlo.
+        if (peticion.Activo is false && id == User.AnalistaId())
+            return UnprocessableEntity(new { motivo = "No podés darte de baja a vos mismo." });
+
+        try
+        {
+            await analistas.ActualizarAsync(id, peticion.Nombre, rol, peticion.Activo, User.AnalistaId(), ct);
+
+            // ARQ-11: si dejó de atender, su versión de seguridad subió; sin limpiar la caché seguiría
+            // entrando hasta un minuto con el token que ya tenía.
+            cache.Remove(VerificadorSesion.ClaveCache(id));
+
+            return NoContent();
         }
         catch (InvalidOperationException ex)
         {

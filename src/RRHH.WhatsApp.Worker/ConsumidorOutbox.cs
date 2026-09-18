@@ -126,20 +126,30 @@ public sealed class ConsumidorOutbox(
             .MarcarFallidoAsync(evento.EventoId, fallo.ToString(), reintentosMaximos, ct);
     }
 
-    /// <summary>Procesa el evento en su propio ambito. Devuelve la excepcion si fallo, o nulo si salio bien.</summary>
+    /// <summary>
+    /// Procesa el evento en su propio ambito y en una sola transaccion con su marca de procesado.
+    /// Devuelve la excepcion si fallo, o nulo si salio bien.
+    /// <para>
+    /// C5, COR-04: antes cada accion guardaba por su cuenta, y un fallo a mitad dejaba aplicadas las
+    /// primeras con el evento de vuelta en Pendiente; el reintento volvia a correr todas las reglas.
+    /// Ahora, si algo falla, no queda nada del intento: ni asignaciones, ni auditoria, ni mensajes
+    /// encolados (V28, V29). El reintento empieza de cero, y lo que ya se habia encolado en un intento
+    /// confirmado no se duplica gracias a la clave de idempotencia.
+    /// </para>
+    /// </summary>
     private async Task<Exception?> IntentarAsync(EventoSistema evento, CancellationToken ct)
     {
         using var ambito = ambitos.CreateScope();
 
         try
         {
-            await ambito.ServiceProvider
-                .GetRequiredService<ProcesadorOutbox>()
-                .ProcesarAsync(evento, ct);
+            var servicios = ambito.ServiceProvider;
 
-            await ambito.ServiceProvider
-                .GetRequiredService<IEventoSistemaService>()
-                .MarcarProcesadoAsync(evento.EventoId, ct);
+            await servicios.GetRequiredService<IUnidadTrabajo>().EjecutarAsync(async c =>
+            {
+                await servicios.GetRequiredService<ProcesadorOutbox>().ProcesarAsync(evento, c);
+                await servicios.GetRequiredService<IEventoSistemaService>().MarcarProcesadoAsync(evento.EventoId, c);
+            }, ct);
 
             return null;
         }

@@ -53,10 +53,12 @@ public sealed class R02Escalamiento : IReglaNegocio
         var unidad = soloHorarioLaboral ? "horas habiles" : "horas";
 
         return Task.FromResult(ResultadoRegla.Con(
+            // El servicio fija el estado al escalar: repetirlo aca lo dejaba Escalada aunque el
+            // escalamiento se hubiera descartado por la revalidacion (COR-13).
             new EscalarARespaldo(
+                ctx.Conversacion!.AnalistaAtendiendoId!.Value,
                 respaldo.AnalistaId,
                 $"El titular no respondio en {horasLimite} {unidad}."),
-            new CambiarEstadoConversacion(EstadoConversacion.Escalada),
             new NotificarAnalista(
                 respaldo.AnalistaId,
                 "Recibiste una conversacion escalada por falta de respuesta del analista titular."),

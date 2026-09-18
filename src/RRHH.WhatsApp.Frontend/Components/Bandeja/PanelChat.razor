@@ -1,5 +1,6 @@
 @inject ClienteApi Api
 @inject SesionAnalista Sesion
+@inject IJSRuntime Js
 
 <div class="panel-chat">
     @if (Detalle is null)
@@ -33,6 +34,13 @@
                     {
                         <span class="chip" title="@postulacion.Estado">
                             @postulacion.Vacante — @postulacion.Etapa
+
+                            @* FUN-08 (A2): reconsiderar un descarte desde el chat, que es donde el
+                               analista se entera de que la persona volvió a escribir. *@
+                            @if (postulacion.Estado == EstadosPostulacion.Descartado)
+                            {
+                                <button class="btn btn-link" @onclick="() => Reingreso(postulacion)">reingreso</button>
+                            }
                         </span>
                     }
                 </div>
@@ -47,10 +55,18 @@
             </div>
         }
 
+        @if (_errorAdjunto is { } errorAdjunto)
+        {
+            <p class="error aviso-adjunto">@errorAdjunto</p>
+        }
+
         <div class="hilo">
             @foreach (var mensaje in Detalle.Mensajes)
             {
-                <div class="mensaje @(mensaje.Direccion == "Entrante" ? "entrante" : "saliente")">
+                var saliente = mensaje.Direccion == "Saliente";
+                var fallido = mensaje.EstadoEntrega == EstadosEntrega.Fallido;
+
+                <div class="mensaje @(saliente ? "saliente" : "entrante") @(fallido ? "fallido" : null)">
                     <p>@mensaje.Contenido</p>
 
                     <span class="meta">
@@ -60,18 +76,84 @@
                             <span class="etiqueta-plantilla">@plantilla</span>
                         }
                         @* Sin analista es el bot: conviene distinguirlo de una respuesta humana. *@
-                        else if (mensaje.Direccion == "Saliente" && mensaje.AnalistaId is null)
+                        else if (saliente && mensaje.AnalistaId is null)
                         {
                             <span class="etiqueta-bot">bot</span>
                         }
+
+                        @* FUN-13 (M2): el estado de lo que sale, como lo muestra WhatsApp. El motivo de
+                           un fallo va en el tooltip: el código de Meta no le sirve a todos. *@
+                        @if (saliente)
+                        {
+                            var entrega = Entrega(mensaje);
+                            <span class="entrega @entrega.Clase" title="@entrega.Titulo">@entrega.Icono</span>
+                        }
                     </span>
+
+                    @* FUN-14 (V33): el CV o la foto del DNI que mandó el postulante. Solo lo que ya pasó
+                       el antivirus se puede bajar; del resto se dice por qué no está. *@
+                    @foreach (var adjunto in mensaje.Adjuntos)
+                    {
+                        <span class="adjunto">
+                            @if (adjunto.Estado == EstadosAdjunto.Descargado)
+                            {
+                                <button class="btn btn-link" disabled="@(_bajando == adjunto.AdjuntoId)"
+                                        @onclick="() => Bajar(adjunto)">
+                                    📎 @Nombre(adjunto)
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="no-disponible" title="@Nombre(adjunto)">📎 @EstadoDelAdjunto(adjunto)</span>
+                            }
+                        </span>
+                    }
+
+                    @if (fallido && saliente)
+                    {
+                        <span class="motivo-fallo">
+                            No llegó al postulante.
+                            @if (PuedeReintentar(mensaje))
+                            {
+                                <button class="btn btn-link" @onclick="() => Reintentar(mensaje)">Reintentar</button>
+                            }
+                        </span>
+                    }
                 </div>
             }
         </div>
 
         @* Regla 4: Sistemas ve todo, pero responder en un hilo ajeno le hablaria al postulante en
-           nombre de otro. La Api lo rechaza igual; aca solo se evita ofrecer lo que no va a andar. *@
-        @if (Detalle.SoloLectura)
+           nombre de otro. La Api lo rechaza igual; aca solo se evita ofrecer lo que no va a andar.
+
+           FUN-01: y un hilo que el bot no pudo clasificar todavia no es de nadie. Antes solo se
+           podía mirar, así que quedaba en la bandeja general hasta que alguien lo reclamara. *@
+        @if (EstaSinClasificar)
+        {
+            <div class="caja-respuesta">
+                <p class="aviso">Sin clasificar: tomá la conversación para poder responderla.</p>
+
+                <div class="fila-tomar">
+                    <select @bind="_cuentaElegida" disabled="@(_tomando || _cuentas.Count == 0)">
+                        <option value="0">Elegí la empresa…</option>
+                        @foreach (var propia in _cuentas)
+                        {
+                            <option value="@propia.CuentaId">@propia.Nombre</option>
+                        }
+                    </select>
+
+                    <button type="button" @onclick="Tomar" disabled="@(_tomando || _cuentaElegida == 0)">
+                        Tomar
+                    </button>
+                </div>
+
+                @if (_motivo is { } motivo)
+                {
+                    <p class="error">@motivo</p>
+                }
+            </div>
+        }
+        else if (Detalle.SoloLectura)
         {
             <div class="caja-respuesta">
                 <p class="aviso">Solo lectura: esta conversación la atiende otro analista.</p>
@@ -79,7 +161,7 @@
         }
         else
         {
-            <CajaRespuesta Detalle="Detalle" AlEnviar="Recargar" />
+            <CajaRespuesta @ref="_caja" Detalle="Detalle" AlEnviar="Recargar" />
         }
     }
 </div>
@@ -87,6 +169,157 @@
 @code {
     [Parameter] public ConversacionDetalle? Detalle { get; set; }
     [Parameter] public EventCallback AlCambiar { get; set; }
+
+    private IReadOnlyList<CuentaDeAnalista> _cuentas = [];
+    private int _cuentaElegida;
+    private bool _tomando;
+    private string? _motivo;
+    private CajaRespuesta? _caja;
+    private long? _bajando;
+    private string? _errorAdjunto;
+
+    /// <summary>FUN-01: el bot no pudo identificar la empresa y el hilo espera a que alguien lo tome.</summary>
+    private bool EstaSinClasificar =>
+        Detalle is not null
+        && string.Equals(Detalle.Resumen.Estado, EstadosConversacion.PendienteClasificar, StringComparison.Ordinal);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _motivo = null;
+        _cuentaElegida = 0;
+
+        // Las cuentas son las que trabaja quien está en sesión: tomar para una ajena lo rechaza la Api.
+        _cuentas = EstaSinClasificar && Sesion.AnalistaId is { } analistaId
+            ? await Api.CuentasDeAnalistaAsync(analistaId)
+            : [];
+    }
+
+    private async Task Tomar()
+    {
+        if (Detalle is null || _cuentaElegida == 0)
+            return;
+
+        _tomando = true;
+        _motivo = null;
+
+        try
+        {
+            var respuesta = await Api.TomarAsync(Detalle.Resumen.ConversacionId, _cuentaElegida);
+
+            if (!respuesta.Exito)
+            {
+                // Con 409 otro la tomó primero: el motivo lo explica y la recarga muestra quién.
+                _motivo = respuesta.Motivo;
+            }
+        }
+        finally
+        {
+            _tomando = false;
+        }
+
+        await Recargar();
+    }
+
+    /// <summary>FUN-08 (A2): devuelve la postulación a un proceso vivo y recarga el chat.</summary>
+    private async Task Reingreso(PostulacionResumen postulacion)
+    {
+        var respuesta = await Api.MarcarReingresoAsync(postulacion.PostulacionId);
+
+        if (!respuesta.Exito)
+        {
+            _motivo = respuesta.Motivo;
+            return;
+        }
+
+        await Recargar();
+    }
+
+    /// <summary>FUN-13: ícono, clase y tooltip del estado de entrega de un saliente.</summary>
+    private static (string Icono, string Clase, string Titulo) Entrega(MensajeResumen mensaje) =>
+        mensaje.EstadoEntrega switch
+        {
+            EstadosEntrega.Enviado => ("✓", "enviado", "Enviado"),
+            EstadosEntrega.Entregado => ("✓✓", "entregado", "Entregado"),
+            EstadosEntrega.Leido => ("✓✓", "leido", "Leído"),
+            EstadosEntrega.Fallido => ("⚠", "fallido", mensaje.Error is { } error ? $"No llegó: {error}" : "No llegó"),
+            _ => ("○", "pendiente", "Todavía no salió")
+        };
+
+    /// <summary>
+    /// FUN-13: la Api dice qué se puede reintentar sin duplicar (<see cref="MensajeResumen.Reintentable"/>).
+    /// Además tiene que haber caja para responder, y el mensaje tiene que ser de quien está en sesión:
+    /// reenviar lo que escribió otro analista sería hablar en su nombre.
+    /// </summary>
+    private bool PuedeReintentar(MensajeResumen mensaje) =>
+        mensaje.Reintentable
+        && HayCajaDeRespuesta
+        && mensaje.AnalistaId is not null
+        && mensaje.AnalistaId == Sesion.AnalistaId;
+
+    /// <summary>Las mismas condiciones con las que se dibuja la caja: la referencia recién existe después.</summary>
+    private bool HayCajaDeRespuesta => Detalle is { SoloLectura: false } && !EstaSinClasificar;
+
+    /// <summary>
+    /// Carga el texto en la caja y no lo envía: el analista decide si mandarlo tal cual, corregirlo o
+    /// pasar a una plantilla si el motivo fue la ventana cerrada. Sale por el mismo POST /responder.
+    /// </summary>
+    private void Reintentar(MensajeResumen mensaje) => _caja?.Proponer(mensaje.Contenido);
+
+    /// <summary>El nombre que puso la persona; sin él, el tipo de archivo en palabras.</summary>
+    private static string Nombre(AdjuntoResumen adjunto) => adjunto.NombreArchivo ?? adjunto.Tipo switch
+    {
+        "image" => "imagen",
+        "audio" => "audio",
+        "video" => "video",
+        "sticker" => "sticker",
+        _ => "documento"
+    };
+
+    /// <summary>Por qué un archivo no se puede bajar. El analista necesita distinguir «todavía no» de «nunca».</summary>
+    private static string EstadoDelAdjunto(AdjuntoResumen adjunto) => adjunto.Estado switch
+    {
+        EstadosAdjunto.Pendiente => "revisando el archivo…",
+        EstadosAdjunto.Rechazado => "el archivo no pasó la revisión",
+        EstadosAdjunto.Purgado => "archivo eliminado por retención",
+        _ => "archivo no disponible"
+    };
+
+    /// <summary>
+    /// FUN-14: el archivo se pide con el token de la sesión, desde el circuito, y se le entrega al
+    /// navegador. No hay URL con el archivo: no queda en el historial ni se puede compartir por error.
+    /// </summary>
+    private async Task Bajar(AdjuntoResumen adjunto)
+    {
+        if (Detalle is null)
+            return;
+
+        _bajando = adjunto.AdjuntoId;
+        _errorAdjunto = null;
+
+        try
+        {
+            await using var archivo = await Api.AdjuntoAsync(Detalle.Resumen.ConversacionId, adjunto.AdjuntoId);
+
+            if (archivo is null)
+            {
+                _errorAdjunto = "No se pudo bajar el archivo. Probá de nuevo en un momento.";
+                return;
+            }
+
+            using var referencia = new DotNetStreamReference(archivo.Contenido, leaveOpen: true);
+
+            await Js.InvokeVoidAsync("descargarArchivo", archivo.Nombre, referencia);
+        }
+        catch (JSException)
+        {
+            // El navegador puede bloquear la descarga; el archivo no se pierde, se vuelve a pedir.
+            _errorAdjunto = "El navegador no dejó guardar el archivo.";
+        }
+        finally
+        {
+            _bajando = null;
+        }
+    }
 
     private Task Recargar() => AlCambiar.InvokeAsync();
 }

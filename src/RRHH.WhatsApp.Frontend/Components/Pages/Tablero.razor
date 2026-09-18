@@ -30,6 +30,25 @@
     }
     else
     {
+        @* FUN-10 (A11): soltar en la columna de descarte despide al postulante. Se confirma aparte
+           porque el arrastre es fácil de hacer sin querer, y el mensaje no se puede deshacer. *@
+        @if (_descarte is { } descarte)
+        {
+            <div class="dialogo">
+                <h4>¿Descartar a @(descarte.Tarjeta.NombrePostulante ?? "este postulante")?</h4>
+
+                <label class="urgente">
+                    <input type="checkbox" @bind="_enviarCierre" />
+                    Enviar mensaje de cierre al postulante
+                </label>
+
+                <div class="dialogo-acciones">
+                    <button class="btn btn-danger" @onclick="ConfirmarDescarte">Descartar</button>
+                    <button class="btn btn-link" @onclick="() => _descarte = null">Cancelar</button>
+                </div>
+            </div>
+        }
+
         <div class="columnas">
             @foreach (var etapa in _tablero.Etapas.OrderBy(e => e.Orden))
             {
@@ -52,6 +71,13 @@
                             }
 
                             <span class="estado">@tarjeta.Estado</span>
+
+                            @* FUN-08 (A2): un descarte que el analista reconsidera, o un ex trabajador
+                               que vuelve, es un proceso vivo otra vez y sale de la columna final. *@
+                            @if (tarjeta.Estado == EstadosPostulacion.Descartado)
+                            {
+                                <button class="btn btn-link" @onclick="() => Reingreso(tarjeta)">Reingreso</button>
+                            }
                         </article>
                     }
                 </section>
@@ -65,11 +91,31 @@
 
     private TableroKanban? _tablero;
     private PostulacionResumen? _arrastrada;
+
+    /// <summary>FUN-10: el descarte que espera confirmacion, con la casilla del cierre marcada por defecto.</summary>
+    private (PostulacionResumen Tarjeta, int EtapaId)? _descarte;
+    private bool _enviarCierre = true;
     private int? _destino;
     private string? _error;
     private bool _cargado;
 
     protected override Task OnParametersSetAsync() => Cargar();
+
+    /// <summary>FUN-08 (A2): devuelve la postulación a un proceso vivo y refresca el tablero.</summary>
+    private async Task Reingreso(PostulacionResumen tarjeta)
+    {
+        _error = null;
+
+        var respuesta = await Api.MarcarReingresoAsync(tarjeta.PostulacionId);
+
+        if (!respuesta.Exito)
+        {
+            _error = respuesta.Motivo ?? "No se pudo marcar el reingreso.";
+            return;
+        }
+
+        await Cargar();
+    }
 
     private async Task Cargar()
     {
@@ -100,14 +146,40 @@
         }
 
         _error = null;
+        _arrastrada = null;
 
+        // FUN-10: la columna de descarte pide confirmacion con la casilla del cierre. Se reconoce por
+        // su desenlace y no por el nombre, que se puede cambiar en la administracion (COR-11).
+        var destino = _tablero?.Etapas.FirstOrDefault(e => e.EtapaId == etapaId);
+
+        if (destino?.EstadoResultante == EstadosPostulacion.Descartado)
+        {
+            _descarte = (tarjeta, etapaId);
+            _enviarCierre = true;
+            return;
+        }
+
+        await MoverAsync(tarjeta, etapaId, enviarCierre: true);
+    }
+
+    private async Task ConfirmarDescarte()
+    {
+        if (_descarte is not { } descarte)
+            return;
+
+        _descarte = null;
+
+        await MoverAsync(descarte.Tarjeta, descarte.EtapaId, _enviarCierre);
+    }
+
+    private async Task MoverAsync(PostulacionResumen tarjeta, int etapaId, bool enviarCierre)
+    {
         // Lo que se mueve es la postulacion, y va por su propia ruta (V22 de docs/decisiones.md).
-        var respuesta = await Api.MoverEtapaAsync(tarjeta.PostulacionId, new PeticionMoverEtapa(etapaId));
+        var respuesta = await Api.MoverEtapaAsync(
+            tarjeta.PostulacionId, new PeticionMoverEtapa(etapaId, enviarCierre));
 
         if (!respuesta.Exito)
             _error = respuesta.Motivo;
-
-        _arrastrada = null;
 
         await Cargar();
     }

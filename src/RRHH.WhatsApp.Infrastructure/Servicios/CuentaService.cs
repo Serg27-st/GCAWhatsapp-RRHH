@@ -6,15 +6,47 @@ using RRHH.WhatsApp.Infrastructure.Persistencia;
 
 namespace RRHH.WhatsApp.Infrastructure.Servicios;
 
-public sealed class CuentaService(RrhhDbContext db, TimeProvider reloj) : ICuentaService
+public sealed class CuentaService(RrhhDbContext db, IAlertaOperativaService alertas, TimeProvider reloj)
+    : ICuentaService
 {
-    public async Task<IReadOnlyList<Cuenta>> ListarConVacantesAbiertasAsync(CancellationToken ct = default) =>
+    public async Task<IReadOnlyList<Cuenta>> ListarMenuAsync(CancellationToken ct = default) =>
         await db.Cuentas
             .AsNoTracking()
-            .Where(c => c.Activo && c.Vacantes.Any(v => v.Estado == EstadoHc.Abierta))
+            .Where(c => c.Activo
+                     && c.Asignaciones.Any(a => !a.EsBackup && a.Analista!.Activo)
+                     && c.Vacantes.Any(v => v.Estado == EstadoHc.Abierta
+                                         && v.UrlJobForms != null
+                                         && v.UrlJobForms != ""))
             .OrderBy(c => c.Nombre)
             .ToListAsync(ct);
 
+
+    public async Task<Hc?> BuscarVacantePorCodigoAsync(
+        IReadOnlyCollection<string> candidatos, CancellationToken ct = default)
+    {
+        if (candidatos.Count == 0)
+            return null;
+
+        return await db.Hcs
+            .AsNoTracking()
+            .Where(h => h.CodigoAviso != null
+                     && candidatos.Contains(h.CodigoAviso)
+                     && h.Cuenta!.Activo)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<Cuenta?> BuscarCuentaDeMenuPorNombreAsync(
+        string textoNormalizado, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(textoNormalizado))
+            return null;
+
+        // La comparacion se hace en memoria sobre las ~20 cuentas del menu: normalizar el nombre
+        // —mayusculas y sin tildes— no se puede traducir a SQL sin depender de la intercalacion.
+        var cuentas = await ListarMenuAsync(ct);
+
+        return cuentas.FirstOrDefault(c => CodigoAviso.Normalizar(c.Nombre) == textoNormalizado);
+    }
     public Task<Hc?> ObtenerVacanteAsync(int hcId, CancellationToken ct = default) =>
         db.Hcs.AsNoTracking().FirstOrDefaultAsync(h => h.HcId == hcId, ct);
 
@@ -26,6 +58,16 @@ public sealed class CuentaService(RrhhDbContext db, TimeProvider reloj) : ICuent
             .AsNoTracking()
             .Where(h => h.CuentaId == cuentaId && h.Estado == EstadoHc.Abierta)
             .OrderBy(h => h.Titulo)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<Hc>> ListarVacantesDeCuentaAsync(
+        int cuentaId, bool incluirCerradas, CancellationToken ct = default) =>
+        await db.Hcs
+            .AsNoTracking()
+            .Where(h => h.CuentaId == cuentaId && (incluirCerradas || h.Estado == EstadoHc.Abierta))
+            // Las abiertas primero: las cerradas solo se miran para reabrir una (FUN-20).
+            .OrderBy(h => h.Estado)
+            .ThenBy(h => h.Titulo)
             .ToListAsync(ct);
 
     public async Task<Hc> CrearVacanteAsync(
@@ -42,15 +84,175 @@ public sealed class CuentaService(RrhhDbContext db, TimeProvider reloj) : ICuent
             Titulo = titulo,
             Estado = EstadoHc.Abierta,
             UrlJobForms = urlJobForms,
+            CodigoAviso = await GenerarCodigoAvisoAsync(ct),
             FechaCreacion = reloj.GetUtcNow().UtcDateTime
         };
 
         db.Hcs.Add(vacante);
+
+        // B2 (COR-18): la auditoria va despues del guardado. Antes, el HcId todavia era 0 y toda
+        // vacante creada quedaba auditada contra la entidad «0», que no se puede rastrear.
+        await db.SaveChangesAsync(ct);
+
         db.Auditorias.Add(Auditar(vacante.HcId, analistaId, "VacanteCreada", titulo));
 
         await db.SaveChangesAsync(ct);
 
+        // COR-09 (V32): la vacante se crea igual —el analista suele no tener el enlace de Google a
+        // mano—, pero queda fuera del menu hasta que alguien lo cargue. La alerta es lo que impide
+        // que eso pase inadvertido y la vacante viva abierta sin recibir postulantes.
+        if (string.IsNullOrWhiteSpace(urlJobForms))
+        {
+            await alertas.RegistrarAsync(TiposAlerta.VacanteSinFormulario, $"hc:{vacante.HcId}",
+                $"La vacante {titulo} se creo sin formulario: no aparece en el menu del bot.", ct);
+        }
+
         return vacante;
+    }
+
+
+    /// <summary>
+    /// FUN-02 (A6): codigo corto y unico para el enlace del aviso. Se reintenta ante colision porque el
+    /// codigo es aleatorio: con 31 simbolos y 6 posiciones el choque es raro, pero el indice unico lo
+    /// rechazaria y el alta de la vacante fallaria por una razon que nadie podria corregir.
+    /// </summary>
+    private async Task<string> GenerarCodigoAvisoAsync(CancellationToken ct)
+    {
+        for (var intento = 0; intento < 10; intento++)
+        {
+            var codigo = CodigoAviso.Generar(Random.Shared);
+
+            if (!await db.Hcs.AnyAsync(h => h.CodigoAviso == codigo, ct))
+                return codigo;
+        }
+
+        throw new InvalidOperationException("No se pudo generar un codigo de aviso unico en 10 intentos.");
+    }
+    public async Task ActualizarVacanteAsync(
+        int hcId, string? titulo, string? urlJobForms, string? codigoAviso, int analistaId,
+        CancellationToken ct = default)
+    {
+        var vacante = await db.Hcs.FirstOrDefaultAsync(h => h.HcId == hcId, ct)
+            ?? throw new InvalidOperationException($"No existe la vacante {hcId}.");
+
+        var cambios = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(titulo) && titulo.Trim() != vacante.Titulo)
+        {
+            vacante.Titulo = titulo.Trim();
+            cambios.Add("titulo");
+        }
+
+        if (!string.IsNullOrWhiteSpace(urlJobForms))
+        {
+            var url = urlJobForms.Trim();
+
+            // El enlace viaja en un mensaje de WhatsApp y por el se mandan el DNI y el CV: uno sin
+            // cifrar dejaria esos datos al alcance de cualquiera en el camino.
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var direccion) || direccion.Scheme != Uri.UriSchemeHttps)
+                throw new InvalidOperationException("El enlace del formulario tiene que ser una URL https.");
+
+            if (url != vacante.UrlJobForms)
+            {
+                vacante.UrlJobForms = url;
+                cambios.Add("formulario");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(codigoAviso))
+        {
+            var codigo = codigoAviso.Trim().ToUpperInvariant();
+
+            // FUN-02: es lo que el postulante transcribe del aviso. Con un formato libre entrarian
+            // codigos que se confunden al dictarlos o que no se pueden escribir en WhatsApp.
+            if (!CodigoAviso.EsValido(codigo))
+            {
+                throw new InvalidOperationException(
+                    $"El codigo '{codigo}' no sirve como codigo de aviso: entre 4 y 12 letras o numeros, sin signos.");
+            }
+
+            if (codigo != vacante.CodigoAviso)
+            {
+                if (await db.Hcs.AnyAsync(h => h.CodigoAviso == codigo && h.HcId != hcId, ct))
+                    throw new InvalidOperationException($"El codigo '{codigo}' ya es de otra vacante.");
+
+                vacante.CodigoAviso = codigo;
+                cambios.Add("codigo");
+            }
+        }
+
+        if (cambios.Count == 0)
+            return;
+
+        db.Auditorias.Add(Auditar(hcId, analistaId, "VacanteEditada", string.Join(", ", cambios)));
+
+        await db.SaveChangesAsync(ct);
+
+        // COR-09 (V32): si quedo sin formulario no aparece en el menu, y eso no puede pasar inadvertido.
+        if (string.IsNullOrWhiteSpace(vacante.UrlJobForms))
+        {
+            await alertas.RegistrarAsync(TiposAlerta.VacanteSinFormulario, $"hc:{hcId}",
+                $"La vacante {vacante.Titulo} no tiene formulario: no aparece en el menu del bot.", ct);
+        }
+    }
+
+    public async Task ReabrirVacanteAsync(int hcId, int analistaId, CancellationToken ct = default)
+    {
+        var vacante = await db.Hcs.FirstOrDefaultAsync(h => h.HcId == hcId, ct)
+            ?? throw new InvalidOperationException($"No existe la vacante {hcId}.");
+
+        if (vacante.Estado == EstadoHc.Abierta)
+            return;
+
+        vacante.Estado = EstadoHc.Abierta;
+        vacante.FechaCierre = null;
+
+        db.Auditorias.Add(Auditar(hcId, analistaId, "VacanteReabierta", vacante.Titulo));
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task ActualizarCuentaAsync(
+        int cuentaId, string? nombre, bool? activo, int analistaId, CancellationToken ct = default)
+    {
+        var cuenta = await db.Cuentas.FirstOrDefaultAsync(c => c.CuentaId == cuentaId, ct)
+            ?? throw new InvalidOperationException($"No existe la cuenta {cuentaId}.");
+
+        if (!string.IsNullOrWhiteSpace(nombre))
+            cuenta.Nombre = nombre.Trim();
+
+        var seDesactiva = activo is false && cuenta.Activo;
+
+        if (activo is { } estado)
+            cuenta.Activo = estado;
+
+        db.Auditorias.Add(new Auditoria
+        {
+            EntidadTipo = nameof(Cuenta),
+            EntidadId = cuentaId.ToString(),
+            AnalistaId = analistaId,
+            Accion = "CuentaEditada",
+            Detalle = $"Nombre: {nombre ?? "sin cambios"}. Activa: {activo?.ToString() ?? "sin cambios"}.",
+            Fecha = reloj.GetUtcNow().UtcDateTime
+        });
+
+        await db.SaveChangesAsync(ct);
+
+        if (!seDesactiva)
+            return;
+
+        // Desactivarla la saca del menu, pero lo que ya esta en curso sigue con su analista: moverlo
+        // seria decidir por el, y cerrarlo, dejar postulantes sin respuesta. Queda la alerta (ARQ-09).
+        var abiertas = await db.Conversaciones.CountAsync(
+            c => c.CuentaContextoId == cuentaId
+              && c.Estado != EstadoConversacion.Archivada
+              && c.Estado != EstadoConversacion.Cerrada, ct);
+
+        if (abiertas > 0)
+        {
+            await alertas.RegistrarAsync(TiposAlerta.CuentaDesactivadaConConversaciones, $"cuenta:{cuentaId}",
+                $"La cuenta {cuenta.Nombre} se desactivo con {abiertas} conversacion(es) en curso.", ct);
+        }
     }
 
     public async Task CerrarVacanteAsync(int hcId, int analistaId, CancellationToken ct = default)

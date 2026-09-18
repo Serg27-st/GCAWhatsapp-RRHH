@@ -24,7 +24,7 @@ public class FiltroAccesoConversacionTests
     private readonly IConversacionService _conversaciones = Substitute.For<IConversacionService>();
 
     private async Task<(bool Paso, IActionResult? Resultado)> EjecutarAsync(
-        string metodo, NivelAcceso nivel, bool conId = true)
+        string metodo, NivelAcceso nivel, bool conId = true, bool permiteTomar = false)
     {
         _conversaciones
             .ObtenerAccesoAsync(ConversacionId, AnalistaId, Arg.Any<CancellationToken>())
@@ -43,6 +43,10 @@ public class FiltroAccesoConversacionTests
 
         if (conId)
             argumentos["id"] = ConversacionId;
+
+        // El atributo [PermiteTomar] viaja en los metadatos del endpoint, como en el enrutado real.
+        if (permiteTomar)
+            accion.ActionDescriptor.EndpointMetadata = [new PermiteTomarAttribute()];
 
         var contexto = new ActionExecutingContext(accion, [], argumentos, controller: new object());
         var paso = false;
@@ -99,6 +103,41 @@ public class FiltroAccesoConversacionTests
         var (paso, _) = await EjecutarAsync("POST", NivelAcceso.Total);
 
         Assert.True(paso);
+    }
+
+    /// <summary>
+    /// FUN-01: tomar corre con nivel Lectura porque el hilo todavia no es de quien lo toma. Es la
+    /// unica excepcion, y por eso va marcada en la accion y no abierta para todo el controlador.
+    /// </summary>
+    [Fact]
+    public async Task Tomar_pasa_con_nivel_de_lectura()
+    {
+        var (paso, resultado) = await EjecutarAsync("POST", NivelAcceso.Lectura, permiteTomar: true);
+
+        Assert.True(paso);
+        Assert.Null(resultado);
+    }
+
+    [Fact]
+    public async Task Tomar_sigue_sin_pasar_si_la_conversacion_no_se_ve()
+    {
+        var (paso, resultado) = await EjecutarAsync("POST", NivelAcceso.Ninguno, permiteTomar: true);
+
+        Assert.False(paso);
+        Assert.IsType<NotFoundObjectResult>(resultado);
+    }
+
+    /// <summary>La excepcion es de «tomar»: cualquier otra accion con nivel Lectura sigue rechazada.</summary>
+    [Fact]
+    public void Solo_la_accion_de_tomar_lleva_el_atributo()
+    {
+        var conAtributo = typeof(ConversacionesController)
+            .GetMethods()
+            .Where(m => m.GetCustomAttributes(typeof(PermiteTomarAttribute), inherit: true).Length > 0)
+            .Select(m => m.Name)
+            .ToList();
+
+        Assert.Equal(["Tomar"], conAtributo);
     }
 
     [Fact]

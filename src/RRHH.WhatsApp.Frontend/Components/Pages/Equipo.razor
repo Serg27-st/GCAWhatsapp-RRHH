@@ -70,10 +70,49 @@
                             </td>
                             <td>@cuenta.VacantesAbiertas</td>
                             <td>
-                                <button class="btn" disabled="@(!borrador.CambiaRespectoDe(cuenta))"
-                                        @onclick="() => GuardarCobertura(cuenta)">Guardar</button>
+                                <div class="acciones">
+                                    <button class="btn" disabled="@(!borrador.CambiaRespectoDe(cuenta))"
+                                            @onclick="() => GuardarCobertura(cuenta)">Guardar</button>
+
+                                    @* FUN-20: hasta ahora el nombre mal escrito de una cuenta, o una que
+                                       ya no se atiende, solo se arreglaban en la base. *@
+                                    @if (Sesion.EsSistemas)
+                                    {
+                                        <button class="btn" @onclick="() => AbrirEdicionCuenta(cuenta)">Editar</button>
+                                    }
+                                </div>
                             </td>
                         </tr>
+
+                        @if (_cuentaEditada == cuenta.CuentaId)
+                        {
+                            <tr>
+                                <td colspan="5">
+                                    <div class="fila-form subpanel">
+                                        <label>
+                                            Nombre
+                                            <input class="form-control" @bind="_nombreCuenta" @bind:event="oninput" />
+                                        </label>
+                                        <button class="btn btn-primary" @onclick="() => GuardarCuenta(cuenta)">Guardar</button>
+
+                                        @if (cuenta.Activo)
+                                        {
+                                            <button class="btn btn-outline-danger" @onclick="() => CambiarEstadoCuenta(cuenta, false)">
+                                                Desactivar
+                                            </button>
+                                            <span class="detalle">
+                                                Desactivarla la saca del menú del bot. Lo que ya está en curso sigue con
+                                                su analista y queda una alerta operativa para cerrarlo.
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn" @onclick="() => CambiarEstadoCuenta(cuenta, true)">Reactivar</button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
                     }
                 </tbody>
             </table>
@@ -113,6 +152,11 @@
                                     @if (Sesion.EsSistemas)
                                     {
                                         <button class="btn" @onclick="() => Alternar(ref _contrasenaDe, analista.AnalistaId)">Contraseña</button>
+
+                                        @* FUN-19: cambiar el rol o dar de baja mueve conversaciones reales,
+                                           así que se abre un panel con lo que tiene encima antes de hacerlo. *@
+                                        <button class="btn" @onclick="() => AbrirEdicion(analista)">Editar</button>
+                                        <button class="btn" @onclick="() => CerrarSesiones(analista)">Cerrar sesiones</button>
                                     }
                                 </div>
                             </td>
@@ -122,6 +166,47 @@
                         {
                             <tr>
                                 <td colspan="4"><EditorAusencias AnalistaId="analista.AnalistaId" /></td>
+                            </tr>
+                        }
+
+                        @if (_edicionDe == analista.AnalistaId)
+                        {
+                            <tr>
+                                <td colspan="4">
+                                    <div class="subpanel">
+                                        <div class="fila-form">
+                                            <label>
+                                                Nombre
+                                                <input class="form-control" @bind="_nombreEditado" @bind:event="oninput" />
+                                            </label>
+                                            <label>
+                                                Rol
+                                                <select class="form-select" @bind="_rolEditado">
+                                                    @foreach (var rol in Catalogos.Roles)
+                                                    {
+                                                        <option value="@rol">@rol</option>
+                                                    }
+                                                </select>
+                                            </label>
+                                            <button class="btn btn-primary" @onclick="() => Guardar(analista)">Guardar</button>
+                                            <button class="btn" @onclick="() => DarDeBaja(analista)">Dar de baja</button>
+                                        </div>
+
+                                        @* Lo que se va a mover: sin esto, dar de baja parece un cambio de estado
+                                           y es una redistribución de trabajo real. *@
+                                        @if (_cartera is { } cartera)
+                                        {
+                                            <p class="detalle">
+                                                Tiene <strong>@cartera.Conversaciones</strong> conversación(es) a cargo.
+                                                Es titular de @cartera.CuentasTitular cuenta(s) y respaldo de
+                                                @cartera.CuentasRespaldo. Al darlo de baja o sacarlo del rol Analista,
+                                                sus conversaciones pasan al respaldo de cada cuenta —o quedan sin
+                                                clasificar si no hay—, sus transferencias pendientes se resuelven y sus
+                                                cuentas quedan con una alerta para que Jefatura las cubra.
+                                            </p>
+                                        }
+                                    </div>
+                                </td>
                             </tr>
                         }
 
@@ -179,6 +264,12 @@
     private bool _cargando = true;
     private int? _ausenciasDe;
     private int? _contrasenaDe;
+    private int? _edicionDe;
+    private int? _cuentaEditada;
+    private string _nombreCuenta = string.Empty;
+    private string _nombreEditado = string.Empty;
+    private string _rolEditado = "Analista";
+    private CarteraAnalista? _cartera;
     private string _contrasenaNueva = string.Empty;
     private string _nuevaCuenta = string.Empty;
     private string? _mensaje;
@@ -294,6 +385,128 @@
         _contrasenaNueva = string.Empty;
 
         Informar($"Contraseña de {analista.Nombre} restablecida. Pasásela por un canal seguro y pedile que la cambie en Mi cuenta.");
+    }
+
+    private void AbrirEdicionCuenta(CuentaDetalle cuenta)
+    {
+        if (_cuentaEditada == cuenta.CuentaId)
+        {
+            _cuentaEditada = null;
+            return;
+        }
+
+        _cuentaEditada = cuenta.CuentaId;
+        _nombreCuenta = cuenta.Nombre;
+    }
+
+    private async Task GuardarCuenta(CuentaDetalle cuenta)
+    {
+        var nombre = _nombreCuenta.Trim();
+
+        var respuesta = await Api.EditarCuentaAsync(cuenta.CuentaId, new PeticionEditarCuenta(
+            string.Equals(nombre, cuenta.Nombre, StringComparison.Ordinal) ? null : nombre,
+            Activo: null));
+
+        await TrasEditarCuentaAsync(respuesta, "Cuenta actualizada.");
+    }
+
+    /// <summary>
+    /// FUN-20: desactivar una cuenta la saca del menú del bot, pero no mueve lo que ya está en curso:
+    /// eso queda con su analista y con una alerta operativa.
+    /// </summary>
+    private async Task CambiarEstadoCuenta(CuentaDetalle cuenta, bool activa)
+    {
+        var respuesta = await Api.EditarCuentaAsync(
+            cuenta.CuentaId, new PeticionEditarCuenta(null, Activo: activa));
+
+        await TrasEditarCuentaAsync(
+            respuesta,
+            activa
+                ? $"{cuenta.Nombre} vuelve a estar activa."
+                : $"{cuenta.Nombre} quedó desactivada: sale del menú del bot y lo que está en curso sigue con su analista.");
+    }
+
+    private async Task TrasEditarCuentaAsync(RespuestaApi respuesta, string mensaje)
+    {
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        _cuentaEditada = null;
+
+        await CargarAsync();
+
+        Informar(mensaje);
+    }
+
+    /// <summary>FUN-19: al abrir la edición se pide la cartera, que es lo que da la dimensión del cambio.</summary>
+    private async Task AbrirEdicion(AnalistaResumen analista)
+    {
+        if (_edicionDe == analista.AnalistaId)
+        {
+            _edicionDe = null;
+            return;
+        }
+
+        _edicionDe = analista.AnalistaId;
+        _nombreEditado = analista.Nombre;
+        _rolEditado = analista.Rol;
+        _cartera = await Api.CarteraAsync(analista.AnalistaId);
+    }
+
+    private async Task Guardar(AnalistaResumen analista)
+    {
+        var nombre = _nombreEditado.Trim();
+
+        var respuesta = await Api.EditarAnalistaAsync(analista.AnalistaId, new PeticionEditarAnalista(
+            string.Equals(nombre, analista.Nombre, StringComparison.Ordinal) ? null : nombre,
+            string.Equals(_rolEditado, analista.Rol, StringComparison.Ordinal) ? null : _rolEditado,
+            Activo: null));
+
+        await TrasEditarAsync(analista, respuesta, $"{analista.Nombre} actualizado.");
+    }
+
+    /// <summary>
+    /// La baja no se deshace desde acá —vuelve a habilitarse en la base— y mueve la bandeja de esa
+    /// persona, así que se avisa qué implica antes de hacerlo.
+    /// </summary>
+    private async Task DarDeBaja(AnalistaResumen analista)
+    {
+        var respuesta = await Api.EditarAnalistaAsync(
+            analista.AnalistaId, new PeticionEditarAnalista(null, null, Activo: false));
+
+        await TrasEditarAsync(
+            analista, respuesta,
+            $"{analista.Nombre} quedó de baja: sus conversaciones se reasignaron y sus sesiones se cerraron.");
+    }
+
+    /// <summary>FUN-18: sin tocarle la contraseña. Sirve para un equipo perdido o una sesión olvidada.</summary>
+    private async Task CerrarSesiones(AnalistaResumen analista)
+    {
+        var respuesta = await Api.CerrarSesionesAsync(analista.AnalistaId);
+
+        Informar(
+            respuesta.Exito ? $"Se cerraron las sesiones de {analista.Nombre}." : respuesta.Motivo,
+            error: !respuesta.Exito);
+    }
+
+    private async Task TrasEditarAsync(AnalistaResumen analista, RespuestaApi respuesta, string mensaje)
+    {
+        if (!respuesta.Exito)
+        {
+            Informar(respuesta.Motivo, error: true);
+            return;
+        }
+
+        _edicionDe = null;
+        _cartera = null;
+
+        // La lista y la cobertura cambian juntas: quien se fue ya no figura como titular ni respaldo.
+        await CargarAsync();
+
+        Informar(mensaje);
     }
 
     private async Task CrearCuenta()

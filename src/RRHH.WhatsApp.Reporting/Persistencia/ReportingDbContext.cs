@@ -21,6 +21,7 @@ public sealed class ReportingDbContext(DbContextOptions<ReportingDbContext> opci
     public DbSet<Cuenta> Cuentas => Set<Cuenta>();
     public DbSet<Auditoria> Auditorias => Set<Auditoria>();
     public DbSet<ConfiguracionRegla> ConfiguracionReglas => Set<ConfiguracionRegla>();
+    public DbSet<HorarioAtencion> HorariosAtencion => Set<HorarioAtencion>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder opciones)
     {
@@ -52,6 +53,9 @@ public sealed class ReportingDbContext(DbContextOptions<ReportingDbContext> opci
             b.Property(x => x.EstadoEntrega).HasConversion<int>();
             b.Ignore(x => x.Conversacion);
             b.Ignore(x => x.Plantilla);
+
+            // V33: los adjuntos son datos personales y ninguna metrica los necesita.
+            b.Ignore(x => x.Adjuntos);
         });
 
         modelo.Entity<Postulacion>(b =>
@@ -94,6 +98,16 @@ public sealed class ReportingDbContext(DbContextOptions<ReportingDbContext> opci
         {
             b.ToTable("ConfiguracionReglas");
             b.HasKey(x => x.Clave);
+        });
+
+        // V31: la primera respuesta se mide en horas habiles, con el mismo CalendarioLaboral que usa
+        // el escalamiento de la Regla 2 (A15). Reporting lee los tramos; no los administra.
+        modelo.Entity<HorarioAtencion>(b =>
+        {
+            b.ToTable("HorarioAtencion");
+            b.HasKey(x => x.HorarioId);
+            b.Property(x => x.DiaSemana).HasConversion<int>();
+            b.Ignore(x => x.Cuenta);
         });
     }
 

@@ -35,7 +35,7 @@ public class VisibilidadTests : IDisposable
 
         _entorno.Db.SaveChanges();
 
-        _cuentas = new CuentaService(_entorno.Db, TimeProvider.System);
+        _cuentas = new CuentaService(_entorno.Db, new AlertaOperativaService(_entorno.Db, TimeProvider.System), TimeProvider.System);
     }
 
     private async Task<int> ConversacionAsignadaAsync()
@@ -75,14 +75,32 @@ public class VisibilidadTests : IDisposable
         Assert.Equal(NivelAcceso.Lectura, await AccesoAsync(id, SistemasId));
     }
 
-    /// <summary>Regla 19: la bandeja general es de todos, y tomar un hilo exige poder responderle.</summary>
+    /// <summary>
+    /// Regla 19 con V30: la bandeja general la ven todos, pero para actuar hay que tomar el hilo
+    /// (FUN-01). Con acceso total para cualquiera, varios le escribían al mismo postulante a la vez.
+    /// </summary>
     [Fact]
-    public async Task Lo_sin_clasificar_es_de_todos()
+    public async Task Lo_sin_clasificar_lo_ven_todos_pero_nadie_actua_sin_tomarlo()
     {
         var id = await ConversacionAsignadaAsync();
         await _entorno.Conversaciones.CambiarEstadoAsync(id, EstadoConversacion.PendienteClasificar);
 
-        Assert.Equal(NivelAcceso.Total, await AccesoAsync(id, AjenoId));
+        Assert.Equal(NivelAcceso.Lectura, await AccesoAsync(id, AjenoId));
+        Assert.Equal(NivelAcceso.Lectura, await AccesoAsync(id, SistemasId));
+    }
+
+    /// <summary>V30: lo que el bot todavía está atendiendo no es de ninguna bandeja. Solo soporte lo mira.</summary>
+    [Fact]
+    public async Task Lo_que_atiende_el_bot_no_lo_ve_ningun_analista()
+    {
+        await _entorno.IngresarAsync(PayloadsDePrueba.MensajeDeTexto);
+        var conversacion = await _entorno.Db.Conversaciones.AsNoTracking().FirstAsync();
+
+        Assert.Equal(EstadoConversacion.EnMenuBot, conversacion.Estado);
+        Assert.Equal(NivelAcceso.Ninguno, await AccesoAsync(conversacion.ConversacionId, AjenoId));
+        Assert.Equal(NivelAcceso.Lectura, await AccesoAsync(conversacion.ConversacionId, SistemasId));
+        Assert.DoesNotContain(await _entorno.Conversaciones.ListarParaAnalistaAsync(SistemasId),
+            c => c.ConversacionId == conversacion.ConversacionId);
     }
 
     [Fact]

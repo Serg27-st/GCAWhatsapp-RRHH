@@ -84,6 +84,42 @@ internal sealed class EntornoDeMetricas : IDisposable
         Guardar();
     }
 
+    /// <summary>
+    /// FUN-17 (A15): horario general de lunes a viernes, 09:00 a 18:00 de Lima. Sin tramos cargados, el
+    /// calendario cuenta a reloj corrido y la métrica no se distingue de la vieja.
+    /// </summary>
+    public void ConHorarioComercial()
+    {
+        for (var dia = DayOfWeek.Monday; dia <= DayOfWeek.Friday; dia++)
+        {
+            _siembra.HorariosAtencion.Add(new HorarioAtencion
+            {
+                CuentaId = null,
+                DiaSemana = dia,
+                HoraInicio = new TimeOnly(9, 0),
+                HoraFin = new TimeOnly(18, 0)
+            });
+        }
+
+        Guardar();
+    }
+
+    /// <summary>Un entrante suelto: la espera empieza acá y sigue abierta hasta que alguien responda.</summary>
+    public void Entrante(int conversacionId, DateTime fecha)
+    {
+        _siembra.Mensajes.Add(Mensaje(conversacionId, DireccionMensaje.Entrante, null, fecha));
+
+        Guardar();
+    }
+
+    /// <summary>La respuesta de una persona: es la que cierra la tanda (FUN-17).</summary>
+    public void RespuestaDeAnalista(int conversacionId, DateTime fecha, int analistaId = TitularId)
+    {
+        _siembra.Mensajes.Add(Mensaje(conversacionId, DireccionMensaje.Saliente, analistaId, fecha));
+
+        Guardar();
+    }
+
     /// <summary>Un mensaje del bot: sale sin analista y no cuenta como primera respuesta.</summary>
     public void MensajeDelBot(int conversacionId, DateTime fecha)
     {

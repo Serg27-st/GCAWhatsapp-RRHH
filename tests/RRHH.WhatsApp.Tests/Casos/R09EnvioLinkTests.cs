@@ -87,9 +87,11 @@ public class R09EnvioLinkTests : IDisposable
     }
 
     [Fact]
-    public async Task Una_vacante_sin_formulario_cargado_no_manda_nada_y_queda_registrada()
+    public async Task Una_vacante_sin_formulario_cargado_no_recibe_postulantes()
     {
-        // Es un dato de administracion que falta, no un error de codigo: tiene que verse.
+        // COR-09 (AL5): sin formulario no hay enlace que mandar, asi que la vacante no se ofrece en
+        // ningun menu. El postulante recibe la salida de la Regla 20, no un enlace muerto; la alerta
+        // para que alguien cargue la URL la deja el alta de la vacante (V32).
         var vacante = await _entorno.Db.Hcs.FirstAsync();
         vacante.UrlJobForms = null;
 
@@ -98,12 +100,9 @@ public class R09EnvioLinkTests : IDisposable
         await _entorno.IngresarAsync(PayloadsDePrueba.RespuestaDeBoton);
         await _entorno.ConsumirOutboxAsync();
 
-        Assert.Empty(Textos());
-
-        var aviso = await _entorno.Db.EventosSistema
-            .AnyAsync(e => e.Tipo == TiposEvento.VacanteSinFormulario);
-
-        Assert.True(aviso);
+        Assert.DoesNotContain(Textos(), e => e.Detalle.Contains("completa esta ficha"));
+        Assert.Empty(_entorno.Db.JobFormsInvitaciones);
+        Assert.False(await _entorno.Db.EventosSistema.AnyAsync(e => e.Tipo == "VacanteSinFormulario"));
     }
 
     public void Dispose() => _entorno.Dispose();

@@ -197,6 +197,44 @@ public class TransferenciaTests : IDisposable
         Assert.Equal(antes + 1, await AvisosParaAsync(EntornoDeReglas.TitularId));
     }
 
+    /// <summary>
+    /// ARQ-13 (AL6): el aviso dice qué conversación mirar, no quién es el postulante. Su nombre y su
+    /// teléfono viven en las tablas, que se purgan (Regla 17); repetirlos en la outbox los dejaría
+    /// fuera de esa purga.
+    /// </summary>
+    [Fact]
+    public async Task El_aviso_de_la_respuesta_no_lleva_datos_del_postulante()
+    {
+        var id = await ConversacionAsignadaAsync();
+        var conversacion = await _entorno.Db.Conversaciones.FirstAsync(c => c.ConversacionId == id);
+
+        conversacion.Postulante = new Domain.Entidades.Postulante
+        {
+            Dni = "45678912",
+            NombreCompleto = "Maria Quispe",
+            FechaRegistro = _entorno.Ahora
+        };
+
+        await _entorno.Db.SaveChangesAsync();
+
+        var transferencia = await TransferirNormalAsync(id);
+
+        await _entorno.Conversaciones.ResponderTransferenciaAsync(
+            transferencia.TransferenciaId, EntornoDeReglas.RespaldoId, aceptada: true);
+
+        var avisos = await _entorno.Db.EventosSistema.AsNoTracking()
+            .Where(e => e.Tipo == TiposEvento.AnalistaNotificado)
+            .Select(e => e.Payload)
+            .ToListAsync();
+
+        Assert.All(avisos, p =>
+        {
+            Assert.DoesNotContain("Maria Quispe", p);
+            Assert.DoesNotContain(conversacion.TelefonoE164, p);
+            Assert.DoesNotContain("45678912", p);
+        });
+    }
+
     [Fact]
     public async Task Solo_el_destino_puede_responderla()
     {

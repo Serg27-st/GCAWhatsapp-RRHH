@@ -34,6 +34,16 @@ public class Analista
     /// <summary>Cuándo se cambió por última vez. Sirve para exigir rotación si algún día hace falta.</summary>
     public DateTime? FechaContrasena { get; set; }
 
+    /// <summary>
+    /// ARQ-11 (V34): versión de seguridad de la sesión. Viaja en el token y se incrementa al
+    /// restablecer la contraseña, al dar de baja y al cambiar el rol.
+    /// <para>
+    /// Un token vive hasta nueve horas: sin esto, quitarle el acceso a alguien no tiene efecto
+    /// hasta que su token vence solo.
+    /// </para>
+    /// </summary>
+    public int VersionSeguridad { get; set; } = 1;
+
     public ICollection<AnalistaCuenta> Cuentas { get; set; } = [];
     public ICollection<Ausencia> Ausencias { get; set; } = [];
 }
@@ -62,6 +72,12 @@ public class Ausencia
     public DateTime FechaInicio { get; set; }
     public DateTime FechaFin { get; set; }
     public string? Motivo { get; set; }
+
+    /// <summary>
+    /// A10: sello del aviso al titular cuando vuelve, con lo que recibio el respaldo mientras no estaba.
+    /// Un solo aviso por ausencia.
+    /// </summary>
+    public DateTime? FechaAvisoRetorno { get; set; }
 
     public Analista? Analista { get; set; }
 }
@@ -98,6 +114,12 @@ public class Hc
 
     /// <summary>URL base del formulario, con los parametros de prellenado que arma IJobFormsInvitacionService.</summary>
     public string? UrlJobForms { get; set; }
+
+    /// <summary>
+    /// A6: codigo corto y unico que va en el enlace del aviso (<c>wa.me/...?text=Postulo CODIGO</c>). El bot
+    /// lo reconoce y manda el formulario sin pasar por el menu de ~20 empresas (FUN-02).
+    /// </summary>
+    public string? CodigoAviso { get; set; }
 
     public DateTime FechaCreacion { get; set; }
     public DateTime? FechaCierre { get; set; }

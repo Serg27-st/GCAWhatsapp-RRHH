@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using RRHH.WhatsApp.Application.Casos;
 using RRHH.WhatsApp.Domain.Enums;
@@ -28,6 +30,8 @@ public class RecepcionWebhookTests : IDisposable
     {
         var opciones = new DbContextOptionsBuilder<RrhhDbContext>()
             .UseInMemoryDatabase($"recepcion-{Guid.NewGuid()}")
+            // V28: la ingesta abre una transaccion por mensaje; lo atomico se prueba en E17 con SQL.
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
         _db = new RrhhDbContext(opciones);
@@ -37,9 +41,10 @@ public class RecepcionWebhookTests : IDisposable
 
         _recepcion = new RecepcionWebhook(
             _proveedor,
-            new ConversacionService(_db, TimeProvider.System, NullLogger<ConversacionService>.Instance),
+            ServiciosDePrueba.Conversaciones(_db, TimeProvider.System),
             new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance),
             new EventoSistemaService(_db, TimeProvider.System, NullLogger<EventoSistemaService>.Instance),
+            new UnidadTrabajoEf(_db),
             NullLogger<RecepcionWebhook>.Instance);
     }
 
@@ -72,7 +77,8 @@ public class RecepcionWebhookTests : IDisposable
 
         Assert.Null(conversacion.PostulanteId);
         Assert.Null(conversacion.CuentaContextoId);
-        Assert.Equal(EstadoConversacion.PendienteClasificar, conversacion.Estado);
+        // V30: nace en el menú del bot, no en «Sin clasificar»: todavía no hay nada que clasificar.
+        Assert.Equal(EstadoConversacion.EnMenuBot, conversacion.Estado);
     }
 
     [Fact]
@@ -171,9 +177,10 @@ public class RecepcionWebhookTests : IDisposable
 
         var recepcion = new RecepcionWebhook(
             proveedorConSecreto,
-            new ConversacionService(_db, TimeProvider.System, NullLogger<ConversacionService>.Instance),
+            ServiciosDePrueba.Conversaciones(_db, TimeProvider.System),
             new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance),
             new EventoSistemaService(_db, TimeProvider.System, NullLogger<EventoSistemaService>.Instance),
+            new UnidadTrabajoEf(_db),
             NullLogger<RecepcionWebhook>.Instance);
 
         var resultado = await recepcion.ProcesarAsync(
@@ -190,8 +197,7 @@ public class RecepcionWebhookTests : IDisposable
     [Fact]
     public async Task Un_acuse_de_entrega_actualiza_el_mensaje_saliente()
     {
-        var conversacion = await new ConversacionService(
-                _db, TimeProvider.System, NullLogger<ConversacionService>.Instance)
+        var conversacion = await ServiciosDePrueba.Conversaciones(_db, TimeProvider.System)
             .ObtenerOCrearAsync("+51987654321");
 
         var mensajes = new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance);
@@ -208,8 +214,7 @@ public class RecepcionWebhookTests : IDisposable
     [Fact]
     public async Task Un_acuse_fallido_guarda_el_error_del_proveedor()
     {
-        var conversacion = await new ConversacionService(
-                _db, TimeProvider.System, NullLogger<ConversacionService>.Instance)
+        var conversacion = await ServiciosDePrueba.Conversaciones(_db, TimeProvider.System)
             .ObtenerOCrearAsync("+51987654321");
 
         var mensajes = new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance);
@@ -234,6 +239,63 @@ public class RecepcionWebhookTests : IDisposable
         Assert.True(resultado.FirmaValida);
         Assert.Equal(2, resultado.EstadosActualizados);
         Assert.Empty(_db.Mensajes);
+    }
+
+
+    /// <summary>
+    /// ARQ-13 (AL6): el payload es el minimo para volver a leer el mensaje. El telefono, el texto y el
+    /// nombre de perfil quedan en las tablas, que si se purgan (Regla 17); la outbox no es un segundo
+    /// almacen de datos personales.
+    /// </summary>
+    [Fact]
+    public async Task El_payload_del_evento_no_lleva_datos_personales()
+    {
+        await _recepcion.ProcesarAsync(PayloadsDePrueba.MensajeDeTexto, SinCabeceras());
+
+        var payload = _db.EventosSistema.Single().Payload;
+
+        Assert.DoesNotContain("51987654321", payload);
+        Assert.DoesNotContain("Maria Quispe", payload);
+        Assert.DoesNotContain("Hola, vi el aviso de trabajo", payload);
+
+        var campos = JsonDocument.Parse(payload).RootElement
+            .EnumerateObject()
+            .Select(p => p.Name.ToLowerInvariant())
+            .OrderBy(n => n)
+            .ToArray();
+
+        Assert.Equal(["conversacionid", "fechaactividadanterior", "idbotonpulsado", "mensajeid"], campos);
+    }
+
+    [Fact]
+    public async Task El_payload_identifica_el_mensaje_y_el_boton_pulsado()
+    {
+        await _recepcion.ProcesarAsync(PayloadsDePrueba.RespuestaDeBoton, SinCabeceras());
+
+        var raiz = JsonDocument.Parse(_db.EventosSistema.Single().Payload).RootElement;
+
+        Assert.Equal(_db.Conversaciones.Single().ConversacionId, raiz.GetProperty("conversacionId").GetInt32());
+        Assert.Equal(_db.Mensajes.Single().MensajeId, raiz.GetProperty("mensajeId").GetInt64());
+        Assert.Equal("cuenta_7", raiz.GetProperty("idBotonPulsado").GetString());
+    }
+
+    /// <summary>
+    /// C1, A13: la instantanea se toma antes de registrar el entrante. Leerla despues daria siempre
+    /// «hace un instante», porque el mismo mensaje ya movio FechaUltimaActividad, y la Regla 9 no
+    /// volveria a preguntar la empresa nunca.
+    /// </summary>
+    [Fact]
+    public async Task El_payload_lleva_la_actividad_anterior_al_mensaje()
+    {
+        await _recepcion.ProcesarAsync(PayloadsDePrueba.MensajeDeTexto, SinCabeceras());
+        await _recepcion.ProcesarAsync(PayloadsDePrueba.RespuestaDeBoton, SinCabeceras());
+
+        var segundo = _db.EventosSistema.OrderBy(e => e.EventoId).Last();
+        var anterior = JsonDocument.Parse(segundo.Payload).RootElement
+            .GetProperty("fechaActividadAnterior").GetDateTime();
+
+        // La del primer entrante, no la del que acaba de llegar.
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1755600000).UtcDateTime, anterior);
     }
 
     public void Dispose() => _db.Dispose();

@@ -35,6 +35,13 @@
                         <span class="fecha">@HoraLima.Hace(conversacion.FechaUltimaActividad)</span>
                     </div>
 
+                    @* FUN-05 (A9): Jefatura ya fue avisada y el postulante sigue esperando. Se ve sin
+                       abrir el hilo: es lo que hay que atender antes que nada. *@
+                    @if (conversacion.Vencida)
+                    {
+                        <span class="vencida" title="Escalada sin respuesta: Jefatura ya fue avisada">vencida</span>
+                    }
+
                     @* Regla 15: fuera de la ventana solo se puede responder con plantilla. *@
                     @if (!conversacion.VentanaAbierta)
                     {

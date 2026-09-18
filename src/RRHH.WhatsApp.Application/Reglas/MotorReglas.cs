@@ -29,13 +29,15 @@ public sealed class MotorReglas(IEnumerable<IReglaNegocio> reglas, ILogger<Motor
             {
                 resultado = await regla.EvaluarAsync(contexto, ct);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Una regla que revienta no debe tumbar el procesamiento del mensaje completo:
-                // se registra y se sigue con las demas. El evento queda en la outbox para reintento.
-                log.LogError(ex, "La regla {Codigo} fallo al evaluar. Correlation {CorrelationId}",
+                // V35: una regla que revienta aborta la evaluacion completa. Seguir con las demas
+                // ejecutaba decisiones tomadas sin la de la que fallo, y el evento se marcaba
+                // procesado igual. Ahora la excepcion llega al consumidor, la transaccion del evento
+                // se deshace (V28) y el evento se reintenta entero.
+                log.LogError(ex, "La regla {Codigo} fallo al evaluar. Se aborta la evaluacion. Correlation {CorrelationId}",
                     regla.Codigo, contexto.CorrelationId);
-                continue;
+                throw;
             }
 
             if (resultado.Acciones.Count > 0)

@@ -24,13 +24,14 @@ public sealed class AccionesBandeja(
         TipoEstadoPostulante tipo,
         string? motivo,
         int analistaId,
+        bool enviarCierre = true,
         CancellationToken ct = default)
     {
         var descartadas = await postulaciones.MarcarEstadoAsync(
             postulanteId, cuentaId, tipo, motivo, analistaId, ct);
 
         foreach (var postulacionId in descartadas)
-            await PublicarDescarteAsync(postulacionId, analistaId, ct);
+            await PublicarDescarteAsync(postulacionId, analistaId, enviarCierre, ct);
 
         log.LogInformation(
             "Postulante {PostulanteId} marcado {Tipo} en la cuenta {CuentaId} por el analista {AnalistaId}.",
@@ -38,22 +39,28 @@ public sealed class AccionesBandeja(
     }
 
     public async Task MoverEtapaAsync(
-        int postulacionId, int etapaId, int analistaId, CancellationToken ct = default)
+        int postulacionId, int etapaId, int analistaId, bool enviarCierre = true, CancellationToken ct = default)
     {
-        await postulaciones.MoverEtapaKanbanAsync(postulacionId, etapaId, analistaId, ct);
+        // COR-11 (P4): el descarte se publica solo cuando la tarjeta **pasa** a descartada. Publicarlo
+        // por el estado final repetia el cierre de cortesia cada vez que alguien tocaba una tarjeta
+        // que ya estaba en esa columna.
+        var movimiento = await postulaciones.MoverEtapaKanbanAsync(postulacionId, etapaId, analistaId, ct);
 
-        // Solo interesa el desenlace: arrastrar la tarjeta a Descartado es la otra via por la que
-        // el postulante queda fuera, y merece el mismo cierre de cortesia que la blacklist.
-        var estado = await postulaciones.ObtenerEstadoAsync(postulacionId, ct);
-
-        if (estado == EstadoPostulacion.Descartado)
-            await PublicarDescarteAsync(postulacionId, analistaId, ct);
+        if (movimiento is { Aplicado: true, Nuevo: EstadoPostulacion.Descartado }
+            && movimiento.Anterior != EstadoPostulacion.Descartado)
+        {
+            await PublicarDescarteAsync(postulacionId, analistaId, enviarCierre, ct);
+        }
     }
 
-    private Task PublicarDescarteAsync(int postulacionId, int analistaId, CancellationToken ct) =>
+    /// <param name="enviarCierre">
+    /// A11: lo que el analista dejo marcado en el dialogo de descarte. Viaja en el evento porque es la
+    /// decision de ese momento, y quien la ejecuta es el motor de reglas (FUN-10).
+    /// </param>
+    private Task PublicarDescarteAsync(int postulacionId, int analistaId, bool enviarCierre, CancellationToken ct) =>
         eventos.PublicarAsync(
             TiposEvento.PostulacionDescartada,
-            new { PostulacionId = postulacionId, AnalistaId = analistaId },
+            new { PostulacionId = postulacionId, AnalistaId = analistaId, EnviarCierre = enviarCierre },
             Guid.NewGuid(),
             ct);
 }

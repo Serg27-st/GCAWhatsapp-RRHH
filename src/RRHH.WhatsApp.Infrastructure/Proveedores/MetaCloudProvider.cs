@@ -90,6 +90,19 @@ public sealed class MetaCloudProvider(
     public IReadOnlyList<EstadoEntregaDto> InterpretarEstados(string cuerpoCrudo) =>
         InterpreteWebhookMeta.Estados(cuerpoCrudo, reloj.GetUtcNow().UtcDateTime, log);
 
+    /// <summary>
+    /// V33: <c>GET {version}/{id}</c> devuelve una URL del CDN de Meta, y el archivo se baja de ahí con
+    /// el mismo token. Solo por https: el token no viaja sin cifrar, aunque la URL venga de Meta.
+    /// </summary>
+    public Task<ResultadoDescarga> DescargarMedioAsync(string proveedorMedioId, CancellationToken ct = default) =>
+        DescargaMedioHttp.DescargarAsync(
+            http,
+            $"{_opciones.Version}/{Uri.EscapeDataString(proveedorMedioId)}",
+            url => url.Scheme == Uri.UriSchemeHttps ? url : null,
+            proveedorMedioId,
+            log,
+            ct);
+
     public Task<ResultadoEnvio> EnviarTextoAsync(
         string telefonoE164, string texto, CancellationToken ct = default) =>
         EnviarAsync(CuerposMensaje.Texto(telefonoE164, texto), ct);

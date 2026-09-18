@@ -5,8 +5,9 @@ using RRHH.WhatsApp.Domain.Entidades;
 using RRHH.WhatsApp.Domain.Enums;
 using RRHH.WhatsApp.Domain.Interfaces;
 using RRHH.WhatsApp.Infrastructure.Persistencia;
-using RRHH.WhatsApp.Infrastructure.Proveedores;
+
 using RRHH.WhatsApp.Infrastructure.Servicios;
+using RRHH.WhatsApp.Tests.Proveedores;
 
 namespace RRHH.WhatsApp.Tests.Casos;
 
@@ -33,13 +34,22 @@ public class ReintentoEnviosTests : IDisposable
         _db.Database.EnsureCreated();
 
         _mensajes = new MensajeService(_db, TimeProvider.System, NullLogger<MensajeService>.Instance);
-        _conversaciones = new ConversacionService(_db, TimeProvider.System, NullLogger<ConversacionService>.Instance);
+        _conversaciones = ServiciosDePrueba.Conversaciones(_db, TimeProvider.System);
         _plantillas = new PlantillaService(_db, TimeProvider.System, NullLogger<PlantillaService>.Instance);
     }
 
-    private ReintentoEnvios Crear() => new(
-        _mensajes, _conversaciones, _plantillas, _proveedor,
-        new ConfiguracionFalsa(_db), TimeProvider.System, NullLogger<ReintentoEnvios>.Instance);
+    private ReintentoEnvios Crear()
+    {
+        var configuracion = new ConfiguracionFalsa(_db);
+        var validador = new ValidadorEnvio(_conversaciones, _plantillas);
+
+        var despacho = new DespachoEnvios(
+            _mensajes, _conversaciones, _plantillas, _proveedor, validador, configuracion,
+            TimeProvider.System, NullLogger<DespachoEnvios>.Instance);
+
+        return new ReintentoEnvios(
+            _mensajes, validador, despacho, configuracion, TimeProvider.System, NullLogger<ReintentoEnvios>.Instance);
+    }
 
     /// <summary>Deja un saliente ya fallido por causa transitoria y con el intento vencido.</summary>
     private async Task<Mensaje> PrepararFallidoAsync(
@@ -202,48 +212,6 @@ public class ReintentoEnviosTests : IDisposable
     public void Dispose() => _db.Dispose();
 
     /// <summary>Proveedor de prueba: devuelve lo que se le indique y cuenta cuantas veces lo llamaron.</summary>
-    private sealed class ProveedorFalso : IWhatsAppProvider
-    {
-        public ResultadoEnvio Respuesta { get; set; } = ResultadoEnvio.Ok("id");
-        public int Llamadas { get; private set; }
-
-        public string Nombre => "falso";
-
-        public Task<ResultadoEnvio> EnviarTextoAsync(string t, string x, CancellationToken ct = default)
-        {
-            Llamadas++;
-            return Task.FromResult(Respuesta);
-        }
-
-        public Task<ResultadoEnvio> EnviarPlantillaAsync(
-            string t, Plantilla p, IReadOnlyList<string> par, CancellationToken ct = default)
-        {
-            Llamadas++;
-            return Task.FromResult(Respuesta);
-        }
-
-        public Task<ResultadoEnvio> EnviarBotonesAsync(
-            string t, string x, IReadOnlyList<BotonRespuesta> b, CancellationToken ct = default)
-        {
-            Llamadas++;
-            return Task.FromResult(Respuesta);
-        }
-
-        public Task<ResultadoEnvio> EnviarListaAsync(
-            string t, string x, string b, IReadOnlyList<BotonRespuesta> o, CancellationToken ct = default)
-        {
-            Llamadas++;
-            return Task.FromResult(Respuesta);
-        }
-
-        public bool ValidarFirma(string c, IReadOnlyDictionary<string, string> h) => true;
-
-        public IReadOnlyList<MensajeEntranteDto> InterpretarWebhook(string c) => [];
-
-        public IReadOnlyList<EstadoEntregaDto> InterpretarEstados(string c) => [];
-    }
-
-    /// <summary>Lee la configuracion sembrada, sin cache: las pruebas cambian valores entre casos.</summary>
     private sealed class ConfiguracionFalsa(RrhhDbContext db) : IConfiguracionReglasService
     {
         public async Task<IReadOnlyDictionary<string, string>> ObtenerTodasAsync(CancellationToken ct = default) =>

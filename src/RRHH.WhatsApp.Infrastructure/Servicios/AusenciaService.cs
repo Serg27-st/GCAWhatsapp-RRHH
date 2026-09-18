@@ -6,7 +6,7 @@ using RRHH.WhatsApp.Infrastructure.Persistencia;
 namespace RRHH.WhatsApp.Infrastructure.Servicios;
 
 /// <summary>Regla 14: ausencias planificadas del analista.</summary>
-public sealed class AusenciaService(RrhhDbContext db) : IAusenciaService
+public sealed class AusenciaService(RrhhDbContext db, TimeProvider reloj) : IAusenciaService
 {
     public async Task<Ausencia> RegistrarAsync(
         int analistaId, DateTime inicio, DateTime fin, string? motivo, CancellationToken ct = default)
@@ -60,5 +60,26 @@ public sealed class AusenciaService(RrhhDbContext db) : IAusenciaService
         await db.SaveChangesAsync(ct);
 
         return true;
+    }
+
+    public async Task<IReadOnlyList<Ausencia>> ListarFinalizadasSinAvisoAsync(
+        DateTime ahora, CancellationToken ct = default) =>
+        await db.Ausencias
+            .AsNoTracking()
+            .Where(a => a.FechaFin < ahora && a.FechaAvisoRetorno == null)
+            .OrderBy(a => a.FechaFin)
+            .ToListAsync(ct);
+
+    public async Task MarcarAvisoRetornoAsync(int ausenciaId, CancellationToken ct = default)
+    {
+        var ausencia = await db.Ausencias.FirstOrDefaultAsync(a => a.AusenciaId == ausenciaId, ct);
+
+        // Borrada mientras tanto: no hay nada que sellar y nada que avisar.
+        if (ausencia is null || ausencia.FechaAvisoRetorno is not null)
+            return;
+
+        ausencia.FechaAvisoRetorno = reloj.GetUtcNow().UtcDateTime;
+
+        await db.SaveChangesAsync(ct);
     }
 }

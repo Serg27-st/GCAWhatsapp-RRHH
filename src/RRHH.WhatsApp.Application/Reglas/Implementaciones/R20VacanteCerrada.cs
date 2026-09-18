@@ -33,12 +33,16 @@ public sealed class R20VacanteCerrada : IReglaNegocio
     public Task<ResultadoRegla> EvaluarAsync(ContextoRegla ctx, CancellationToken ct = default)
     {
         var cuenta = ctx.Cuenta!;
+        var vacante = ctx.Hc?.Titulo ?? $"que buscabas en {cuenta.Nombre}";
 
         var acciones = new List<AccionRegla>
         {
-            new EnviarPlantilla(
+            // COR-03 (P1): el aviso llega en texto mientras la ventana esta abierta, que es lo normal
+            // aca —el postulante acaba de escribir— y no depende de que Meta aprobara la plantilla.
+            new EnviarMensajeBot(
+                TextosBot.VacanteCerrada(vacante),
                 ClavesPlantilla.VacanteCerrada,
-                [ctx.Hc?.Titulo ?? $"que buscabas en {cuenta.Nombre}"])
+                [vacante])
         };
 
         if (ctx.VacantesAbiertas.Count > 0)

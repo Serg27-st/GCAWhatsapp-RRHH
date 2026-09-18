@@ -5,6 +5,7 @@ using RRHH.WhatsApp.Application.Casos;
 using RRHH.WhatsApp.Contracts.Bandeja;
 using RRHH.WhatsApp.Domain.Entidades;
 using RRHH.WhatsApp.Domain.Enums;
+using RRHH.WhatsApp.Domain.Excepciones;
 using RRHH.WhatsApp.Domain.Interfaces;
 
 namespace RRHH.WhatsApp.Api.Controllers;
@@ -23,6 +24,7 @@ public sealed class ConversacionesController(
     IPostulacionService postulaciones,
     EnvioAnalista envio,
     AccionesBandeja acciones,
+    IAlmacenamientoAdjuntos adjuntos,
     TimeProvider reloj,
     ILogger<ConversacionesController> log) : ControllerBase
 {
@@ -120,6 +122,35 @@ public sealed class ConversacionesController(
             soloLectura));
     }
 
+    /// <summary>
+    /// FUN-14 (V33): el archivo que mando el postulante. Pasa por el mismo filtro que el chat (Regla 4)
+    /// y solo se entrega si ya paso el antivirus y es de esta conversacion: el id del adjunto solo no
+    /// alcanza para pedir el de otra.
+    /// </summary>
+    [HttpGet("{id:int}/adjuntos/{adjuntoId:long}")]
+    public async Task<IActionResult> Adjunto(int id, long adjuntoId, CancellationToken ct)
+    {
+        var adjunto = await mensajes.ObtenerAdjuntoAsync(adjuntoId, id, ct);
+
+        if (adjunto is not { Estado: EstadoAdjunto.Descargado, Ruta: { } ruta })
+            return NotFound(new { motivo = "El archivo no esta disponible." });
+
+        var contenido = await adjuntos.ObtenerAsync(ruta, ct);
+
+        if (contenido is null)
+        {
+            log.LogWarning("El adjunto {AdjuntoId} figura descargado pero su archivo no esta.", adjuntoId);
+            return NotFound(new { motivo = "El archivo no esta disponible." });
+        }
+
+        // El nombre lo puso el postulante: sirve para mostrar, pero la extension es la del archivo
+        // guardado, que es la que paso los controles (V33).
+        var nombre = Path.GetFileNameWithoutExtension(adjunto.NombreArchivo ?? $"adjunto-{adjuntoId}")
+            + Path.GetExtension(ruta);
+
+        return File(contenido, adjunto.MimeType, nombre);
+    }
+
     /// <summary>Regla 15: es aca donde se aplica el limite de opt-in y la ventana de 24h.</summary>
     [HttpPost("{id:int}/responder")]
     public async Task<IActionResult> Responder(
@@ -128,7 +159,8 @@ public sealed class ConversacionesController(
         try
         {
             var resultado = await envio.ResponderAsync(
-                id, User.AnalistaId(), peticion.Texto, peticion.ClavePlantilla, peticion.Parametros, ct);
+                id, User.AnalistaId(), peticion.Texto, peticion.ClavePlantilla, peticion.Parametros,
+                peticion.ClaveIdempotencia, ct);
 
             var respuesta = new ResultadoResponder(
                 resultado.Enviado, resultado.Motivo, resultado.RequierePlantilla, resultado.MensajeId);
@@ -142,6 +174,35 @@ public sealed class ConversacionesController(
         }
     }
 
+
+    /// <summary>
+    /// FUN-01 (AL1, P3): el analista se adjudica un hilo de «Sin clasificar» para una de sus cuentas.
+    /// Es la unica salida de esa bandeja, y por eso corre con nivel Lectura (<see cref="PermiteTomarAttribute"/>).
+    /// </summary>
+    [HttpPost("{id:int}/tomar")]
+    [PermiteTomar]
+    public async Task<IActionResult> Tomar(int id, [FromBody] PeticionTomar peticion, CancellationToken ct)
+    {
+        try
+        {
+            var conversacion = await conversaciones.TomarAsync(id, User.AnalistaId(), peticion.CuentaId, ct);
+
+            return Ok(conversacion.AResumen(reloj.GetUtcNow().UtcDateTime));
+        }
+        catch (ConflictoConcurrenciaException ex)
+        {
+            // Otro llego primero: la pantalla tiene que refrescarse y mostrar que ya no esta libre.
+            return Conflict(new { motivo = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { motivo = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return UnprocessableEntity(new { motivo = ex.Message });
+        }
+    }
     /// <summary>Regla 8: transferencia manual a otro analista, de uno en uno.</summary>
     [HttpPost("{id:int}/transferir")]
     public async Task<IActionResult> Transferir(
@@ -187,10 +248,15 @@ public sealed class ConversacionesController(
             return UnprocessableEntity(new { motivo = "El postulante o la cuenta no corresponden a esta conversación." });
         }
 
+        // FUN-01 (P3): marcar es actuar sobre el caso; primero hay que tomarlo de la bandeja general.
+        if (conversacion.Estado is EstadoConversacion.PendienteClasificar or EstadoConversacion.EnMenuBot)
+            return UnprocessableEntity(new { motivo = MotivosBandeja.TomarPrimero });
+
         try
         {
             await acciones.MarcarAsync(
-                peticion.PostulanteId, peticion.CuentaId, tipo, peticion.Motivo, User.AnalistaId(), ct);
+                peticion.PostulanteId, peticion.CuentaId, tipo, peticion.Motivo, User.AnalistaId(),
+                peticion.EnviarCierre, ct);
 
             return NoContent();
         }
